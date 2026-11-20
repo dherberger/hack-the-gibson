@@ -20,7 +20,7 @@
 #define MAX_PULSE_HEIGHT 15.f
 /* Tower footprint scale (base mesh is 9.125 units wide on a 30-unit grid).
    The flight path keeps >= 1.5 units of clearance up to 1.9. */
-#define TOWER_FOOTPRINT 1.9f
+#define TOWER_FOOTPRINT 1.6f
 #define TOWER_HEIGHT 1.1f
 
 static float gibson_tower_footprint(void)

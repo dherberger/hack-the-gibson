@@ -24,7 +24,31 @@ static int gibson_clamp_wrap(int idx, int size)
     return idx;
 }
 
+/* Fly low like the film (camera ~1/6 of tower height): squash the authored
+ * path height (6-30 units) down to ~4-11, but blend back to the original
+ * height for the rooftop swoop (y > ~46), which crosses tower footprints. */
+#define GIBSON_CAM_LOW_BASE 4.f
+#define GIBSON_CAM_LOW_SCALE 0.3f
+#define GIBSON_CAM_PATH_MIN_Y 6.4f
+
+static float gibson_low_flight_y(float y)
+{
+    const float low = GIBSON_CAM_LOW_BASE + (y - GIBSON_CAM_PATH_MIN_Y) * GIBSON_CAM_LOW_SCALE;
+    float t = std::max(0.f, std::min(1.f, (y - 28.f) / (46.f - 28.f)));
+    t = t * t * (3.f - 2.f * t);
+    return low + (y - low) * t;
+}
+
+static SCNVector3 gibson_spline_at_raw(float dt);
+
 static SCNVector3 gibson_spline_at(float dt)
+{
+    SCNVector3 p = gibson_spline_at_raw(dt);
+    p.y = gibson_low_flight_y((float)p.y);
+    return p;
+}
+
+static SCNVector3 gibson_spline_at_raw(float dt)
 {
     const int pSize = GIBSON_FLY_PATH_COUNT;
     const int unwrappedIdx = (int)std::floor(dt);
