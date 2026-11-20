@@ -18,6 +18,17 @@
 #define MAX_PULSE_SPEED 200.f
 #define MIN_PULSE_SPEED 120.f
 #define MAX_PULSE_HEIGHT 15.f
+/* Tower footprint scale (base mesh is 9.125 units wide on a 30-unit grid).
+   The flight path keeps >= 1.5 units of clearance up to 1.9. */
+#define TOWER_FOOTPRINT 1.9f
+#define TOWER_HEIGHT 1.1f
+
+static float gibson_tower_footprint(void)
+{
+    const char *env = std::getenv("GIBSON_TOWER_SCALE");  /* dev override */
+    const float v = env ? (float)std::atof(env) : 0.f;
+    return (v > 0.5f && v < 2.5f) ? v : TOWER_FOOTPRINT;
+}
 
 static float gibson_rand(float low, float high)
 {
@@ -303,9 +314,10 @@ static GibsonSCNScene *g_fullWorld;
     float x = -((_gridX / 2) * TOWER_DIST);
     float z = ((_gridY / 2) * TOWER_DIST);
 
+    const float footprint = gibson_tower_footprint();
     auto place = ^(SCNGeometry *g, SCNNode *parent, float px, float pz) {
         SCNNode *tower = [SCNNode nodeWithGeometry:g];
-        tower.scale = SCNVector3Make(1.3f, 1.1f, 1.3f);
+        tower.scale = SCNVector3Make(footprint, TOWER_HEIGHT, footprint);
         tower.position = SCNVector3Make(px, 14.f, pz);
         [parent addChildNode:tower];
     };

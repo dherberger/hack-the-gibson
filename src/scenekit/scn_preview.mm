@@ -86,6 +86,9 @@ static int gibson_write_sequence(NSURL *media, const char *dir, int count, doubl
     renderer.scene = world.scene;
     renderer.pointOfView = world.cameraNode;
     renderer.autoenablesDefaultLighting = NO;
+    /* Offscreen snapshots turn motion blur into heavy grain; the live view
+       is fine, so only the comparison frames drop it. */
+    world.cameraNode.camera.motionBlurIntensity = 0.0;
 
     const double step = 1.0 / 60.0;
     double t = 0.0;
