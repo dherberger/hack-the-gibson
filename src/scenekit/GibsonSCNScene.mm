@@ -22,7 +22,10 @@
 /* Tower footprint scale (base mesh is 9.125 units wide on a 30-unit grid).
    The flight path keeps >= 1.5 units of clearance up to 1.9. */
 #define TOWER_FOOTPRINT 1.6f
-#define TOWER_HEIGHT 1.1f
+#define TOWER_HEIGHT 1.265f       /* 15% taller than the original 1.1 */
+/* towers.obj spans y -12.69..21.69; keep the base on the floor (y ~0.04). */
+#define TOWER_MESH_BOTTOM (-12.6916f)
+#define TOWER_BASE_Y 0.04f
 
 static float gibson_tower_footprint(void)
 {
@@ -386,7 +389,7 @@ static NSImage *gibson_trace_mask_image(NSImage *src)
     auto place = ^(SCNGeometry *g, SCNNode *parent, float px, float pz) {
         SCNNode *tower = [SCNNode nodeWithGeometry:g];
         tower.scale = SCNVector3Make(footprint, TOWER_HEIGHT, footprint);
-        tower.position = SCNVector3Make(px, 14.f, pz);
+        tower.position = SCNVector3Make(px, TOWER_BASE_Y - TOWER_MESH_BOTTOM * TOWER_HEIGHT, pz);
         [parent addChildNode:tower];
     };
 
