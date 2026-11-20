@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>The Gibson</string>
+	<key>CFBundleExecutable</key>
+	<string>TheGibson</string>
+	<key>CFBundleIdentifier</key>
+	<string>org.hackthegibson.TheGibson.ScreenSaver</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>The Gibson</string>
+	<key>CFBundlePackageType</key>
+	<string>XPC!</string>
+	<key>CFBundleShortVersionString</key>
+	<string>2.0</string>
+	<key>CFBundleVersion</key>
+	<string>2.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.screensaver</string>
+		<key>NSExtensionPointVersion</key>
+		<string>1.0</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>GibsonScreenSaverExtension</string>
+	</dict>
+	<key>NSExtensionContextClass</key>
+	<string>ScreenSaverExtensionContext</string>
+	<key>SSEHasConfigureSheet</key>
+	<false/>
+	<key>SSENeedsAnimationTimer</key>
+	<false/>
+	<key>ScreenSaverViewControllerClass</key>
+	<string>GibsonScreenSaverViewController</string>
+</dict>
+</plist>

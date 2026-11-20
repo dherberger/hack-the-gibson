@@ -1,5 +1,6 @@
 # Convenience wrapper so `make` works from the project root.
-.PHONY: all clean run saver install-saver uninstall-saver enable-saver scn
+.PHONY: all clean run saver install-saver uninstall-saver enable-saver scn \
+	legacy-saver notarize run-app
 
 all:
 	$(MAKE) -C src
@@ -24,3 +25,12 @@ enable-saver:
 
 uninstall-saver:
 	$(MAKE) -C src uninstall-saver
+
+legacy-saver:
+	$(MAKE) -C src legacy-saver
+
+run-app:
+	$(MAKE) -C src run-app
+
+notarize:
+	$(MAKE) -C src notarize

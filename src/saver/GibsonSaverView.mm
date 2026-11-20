@@ -3,24 +3,39 @@
 
 #import <QuartzCore/QuartzCore.h>
 #import <SceneKit/SceneKit.h>
+#include <os/log.h>
 
 #include "gibson_settings.h"
-#include <cstdio>
+
+/* Public so `log stream --predicate 'subsystem == "org.hackthegibson.TheGibson"'`
+ * shows the text instead of <private>. */
+static os_log_t gibson_os_log(void)
+{
+    static os_log_t log;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        log = os_log_create("org.hackthegibson.TheGibson", "saver");
+    });
+    return log;
+}
 
 static void gibson_log(NSString *msg)
 {
-    NSLog(@"The Gibson screensaver: %@", msg);
-    FILE *fp = fopen("/tmp/gibson-saver.log", "a");
-    if (fp)
-    {
-        fprintf(fp, "%s\n", msg.UTF8String);
-        fclose(fp);
-    }
+    os_log(gibson_os_log(), "The Gibson screensaver: %{public}@", msg);
 }
+
+/* Posted by the screensaver host (distributed notifications). The appex host
+ * never calls -stopAnimation and keeps the extension process alive between
+ * sessions, so these are the only reliable "stop rendering" signals besides
+ * the view leaving its window. */
+static NSString *const kSaverDidStart = @"com.apple.screensaver.didstart";
+static NSString *const kSaverWillStop = @"com.apple.screensaver.willstop";
+static NSString *const kSaverDidStop = @"com.apple.screensaver.didstop";
 
 @implementation GibsonSaverView
 {
     SCNView *_scnView;
+    BOOL _sessionActive;
 }
 
 + (BOOL)performGammaFade
@@ -42,6 +57,11 @@ static void gibson_log(NSString *msg)
     CGColorRef bg = CGColorCreateGenericRGB(0.0, 10.0 / 255.0, 15.0 / 255.0, 1.0);
     self.layer.backgroundColor = bg;
     CGColorRelease(bg);
+
+    NSDistributedNotificationCenter *dnc = [NSDistributedNotificationCenter defaultCenter];
+    [dnc addObserver:self selector:@selector(saverDidStart:) name:kSaverDidStart object:nil];
+    [dnc addObserver:self selector:@selector(saverWillStop:) name:kSaverWillStop object:nil];
+    [dnc addObserver:self selector:@selector(saverWillStop:) name:kSaverDidStop object:nil];
 }
 
 - (instancetype)initWithFrame:(NSRect)frame isPreview:(BOOL)isPreview
@@ -69,12 +89,18 @@ static void gibson_log(NSString *msg)
     return self;
 }
 
+- (void)dealloc
+{
+    [[NSDistributedNotificationCenter defaultCenter] removeObserver:self];
+    gibson_log(@"dealloc");
+}
+
 - (BOOL)isOpaque { return YES; }
 - (BOOL)hasConfigureSheet { return NO; }
 
 - (void)attachSceneIfNeeded
 {
-    if (_scnView || self.isPreview)
+    if (_scnView)
         return;
 
     NSURL *media = [self mediaURL];
@@ -91,8 +117,8 @@ static void gibson_log(NSString *msg)
     _scnView.layer.opaque = YES;
     /* Retina backing is 4x the pixels on this display; 1x is plenty for a saver. */
     _scnView.layer.contentsScale = 1.0;
-    [GibsonSCNScene configureView:_scnView preview:NO mediaURL:media];
-    _scnView.preferredFramesPerSecond = 60;
+    [GibsonSCNScene configureView:_scnView preview:self.isPreview mediaURL:media];
+    _scnView.preferredFramesPerSecond = self.isPreview ? 30 : 60;
     _scnView.antialiasingMode = SCNAntialiasingModeNone;
     _scnView.playing = NO;
     _scnView.rendersContinuously = NO;
@@ -106,17 +132,60 @@ static void gibson_log(NSString *msg)
     _scnView.rendersContinuously = playing;
 }
 
+/* Idempotent: called from -viewDidMoveToWindow, -startAnimation and didstart,
+ * whichever the host happens to deliver. */
+- (void)beginSession:(NSString *)reason
+{
+    if (_sessionActive || !self.window)
+        return;
+    _sessionActive = YES;
+
+    NSString *res = [[NSBundle bundleForClass:[self class]] resourcePath];
+    gibson_settings_reload(res.fileSystemRepresentation);
+    gibson_log([NSString stringWithFormat:@"begin (%@) fly_speed=%.2f bank=%.2f from %s",
+                reason, gibson_fly_speed(), gibson_bank_strength(),
+                gibson_settings_path()[0] ? gibson_settings_path() : "(default)"]);
+
+    [self attachSceneIfNeeded];
+    [[GibsonSCNScene sharedWorldForPreview:self.isPreview mediaURL:[self mediaURL]] resetClock];
+    [self setPlaying:YES];
+}
+
+- (void)endSession:(NSString *)reason
+{
+    if (!_sessionActive)
+        return;
+    _sessionActive = NO;
+    [self setPlaying:NO];
+    gibson_log([NSString stringWithFormat:@"end (%@)", reason]);
+}
+
+- (void)viewDidMoveToWindow
+{
+    [super viewDidMoveToWindow];
+    gibson_log([NSString stringWithFormat:@"viewDidMoveToWindow hasWindow=%d win=%.0fx%.0f",
+                self.window != nil,
+                self.window.frame.size.width, self.window.frame.size.height]);
+    if (self.window)
+        [self beginSession:@"window"];
+    else
+        [self endSession:@"no window"];
+}
+
+- (void)saverDidStart:(NSNotification *)note
+{
+    [self beginSession:@"didstart"];
+}
+
+- (void)saverWillStop:(NSNotification *)note
+{
+    [self endSession:note.name];
+}
+
 - (void)startAnimation
 {
     [super startAnimation];
-    NSString *res = [[NSBundle bundleForClass:[self class]] resourcePath];
-    gibson_settings_reload(res.fileSystemRepresentation);
-    gibson_log([NSString stringWithFormat:@"fly_speed=%.2f bank=%.2f from %s",
-                gibson_fly_speed(), gibson_bank_strength(),
-                gibson_settings_path()[0] ? gibson_settings_path() : "(default)"]);
-    [self attachSceneIfNeeded];
-    [[GibsonSCNScene sharedWorldForPreview:NO mediaURL:[self mediaURL]] resetClock];
-    [self setPlaying:YES];
+    [self beginSession:@"startAnimation"];
     gibson_log([NSString stringWithFormat:@"startAnimation %.0fx%.0f win=%.0fx%.0f",
                 self.bounds.size.width, self.bounds.size.height,
                 self.window.frame.size.width, self.window.frame.size.height]);
@@ -124,8 +193,7 @@ static void gibson_log(NSString *msg)
 
 - (void)stopAnimation
 {
-    gibson_log(@"stopAnimation");
-    [self setPlaying:NO];
+    [self endSession:@"stopAnimation"];
     [super stopAnimation];
 }
 

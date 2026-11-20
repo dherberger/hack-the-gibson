@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Point macOS 14+ idle wallpaper at Gibson.saver so hot corners load it.
+"""Point macOS 14+ idle wallpaper at The Gibson screensaver appex.
 
-System Settings preview uses legacyScreenSaver.appex and can show The Gibson
-while idle/hot-corners still run Shell.appex. This writes the same Idle blob
-PaperSaver uses for a traditional .saver.
+System Settings can list the extension after pluginkit registration while
+hot corners / idle still run a built-in saver. This writes the same Idle
+blob PaperSaver uses for an .appex screensaver.
 """
 
 from __future__ import annotations
@@ -14,11 +14,12 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
-SAVER = Path.home() / "Library/Screen Savers/Gibson.saver"
+APP = Path("/Applications/TheGibson.app")
+APPEX = APP / "Contents/PlugIns/TheGibson.appex"
 INDEX = (
     Path.home()
     / "Library/Application Support/com.apple.wallpaper/Store/Index.plist"
@@ -29,9 +30,9 @@ def binary_plist(obj) -> bytes:
     return plistlib.dumps(obj, fmt=plistlib.FMT_BINARY)
 
 
-def idle_blob(saver: Path) -> dict:
-    now = datetime.utcnow()
-    config = binary_plist({"module": {"relative": saver.resolve().as_uri()}})
+def idle_blob(appex: Path) -> dict:
+    now = datetime.now(timezone.utc)
+    config = binary_plist({"module": {"relative": appex.resolve().as_uri()}})
     return {
         "Content": {
             "Choices": [
@@ -47,7 +48,7 @@ def idle_blob(saver: Path) -> dict:
     }
 
 
-def set_module_dict(saver: Path) -> None:
+def set_module_dict(appex: Path) -> None:
     subprocess.run(
         [
             "defaults",
@@ -59,7 +60,7 @@ def set_module_dict(saver: Path) -> None:
             "moduleName",
             "The Gibson",
             "path",
-            str(saver),
+            str(appex),
             "type",
             "-int",
             "0",
@@ -89,8 +90,9 @@ def idle_module(plist: dict) -> str | None:
 
 
 def main() -> int:
-    if not SAVER.exists():
-        print(f"missing {SAVER}", file=sys.stderr)
+    if not APPEX.exists():
+        print(f"missing {APPEX}", file=sys.stderr)
+        print("Install first with: make install-saver", file=sys.stderr)
         return 1
     if not INDEX.exists():
         print(f"missing {INDEX}", file=sys.stderr)
@@ -104,7 +106,7 @@ def main() -> int:
     with INDEX.open("rb") as fh:
         plist = plistlib.load(fh)
 
-    idle = idle_blob(SAVER)
+    idle = idle_blob(APPEX)
     for key in ("AllSpacesAndDisplays", "SystemDefault"):
         section = plist.get(key)
         if isinstance(section, dict):
@@ -114,7 +116,7 @@ def main() -> int:
     with tmp.open("wb") as fh:
         plistlib.dump(plist, fh, fmt=plistlib.FMT_BINARY)
     os.replace(tmp, INDEX)
-    set_module_dict(SAVER)
+    set_module_dict(APPEX)
     restart_wallpaper_agent()
     time.sleep(1.5)
 
@@ -122,14 +124,14 @@ def main() -> int:
         after = plistlib.load(fh)
     url = idle_module(after)
     print(f"idle module={url}")
-    if url and "Gibson.saver" in url:
+    if url and "TheGibson.appex" in url:
         print("hot corners should now load The Gibson")
         return 0
 
     print("WallpaperAgent rewrote Idle; writing again", file=sys.stderr)
     with INDEX.open("rb") as fh:
         plist = plistlib.load(fh)
-    idle = idle_blob(SAVER)
+    idle = idle_blob(APPEX)
     for key in ("AllSpacesAndDisplays", "SystemDefault"):
         section = plist.get(key)
         if isinstance(section, dict):
@@ -143,7 +145,7 @@ def main() -> int:
         after = plistlib.load(fh)
     url = idle_module(after)
     print(f"idle module={url}")
-    return 0 if url and "Gibson.saver" in url else 2
+    return 0 if url and "TheGibson.appex" in url else 2
 
 
 if __name__ == "__main__":
