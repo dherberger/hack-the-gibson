@@ -180,7 +180,10 @@ scn: $(PREVIEW)
 
 saver: $(APP_BIN)
 
-$(APPEX_BIN): $(SCN_OBJS) $(SAVER_OBJS) $(APPEX_OBJS) saver/TheGibson.appex.plist saver/TheGibson.appex.entitlements $(ROOT)/config.txt
+# Media is copied into the bundle, so a regenerated texture must trigger a rebuild.
+MEDIA_FILES := $(wildcard $(ROOT)/media/*)
+
+$(APPEX_BIN): $(SCN_OBJS) $(SAVER_OBJS) $(APPEX_OBJS) saver/TheGibson.appex.plist saver/TheGibson.appex.entitlements $(ROOT)/config.txt $(MEDIA_FILES)
 	rm -rf "$(APPEX_DIR)"
 	mkdir -p "$(APPEX_DIR)/Contents/MacOS" "$(APPEX_DIR)/Contents/Resources/media"
 	cp saver/TheGibson.appex.plist "$(APPEX_DIR)/Contents/Info.plist"

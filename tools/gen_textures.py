@@ -727,7 +727,7 @@ PCB_VIA_R = 7
 PCB_HOLE_R = 2.5
 PCB_THIN_V = 215              # thin and thick traces read as two "colors"
 PCB_THICK_V = 255
-PCB_COVERAGE = 0.074          # sparse: well below the reference's ~30%
+PCB_COVERAGE = 0.104          # sparse: well below the reference's ~30%
 DIRS = [(1, 0), (0, 1), (-1, 0), (0, -1)]
 
 

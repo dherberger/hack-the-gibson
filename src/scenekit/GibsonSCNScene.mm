@@ -288,7 +288,8 @@ static float gibson_env_float(const char *name, float fallback, float lo, float 
 
 /* The floor's transparency mask: the trace texture thresholded so the dark
  * gaps (and the soft halo) are exactly 0 = opaque and the trace cores are
- * bright = see-through to the mirrored towers below (RGBZero mode). */
+ * bright = see-through to the mirrored towers below (RGBZero mode). Trace
+ * cores are at most 27.5% see-through (the last points of the curve). */
 static NSImage *gibson_trace_mask_image(NSImage *src)
 {
     CGImageRef cg = [src CGImageForProposedRect:NULL context:nil hints:nil];
@@ -299,9 +300,9 @@ static NSImage *gibson_trace_mask_image(NSImage *src)
     [curve setValue:ci forKey:kCIInputImageKey];
     [curve setValue:[CIVector vectorWithX:0.0 Y:0.0] forKey:@"inputPoint0"];
     [curve setValue:[CIVector vectorWithX:0.35 Y:0.0] forKey:@"inputPoint1"];
-    [curve setValue:[CIVector vectorWithX:0.55 Y:0.28] forKey:@"inputPoint2"];
-    [curve setValue:[CIVector vectorWithX:0.75 Y:0.55] forKey:@"inputPoint3"];
-    [curve setValue:[CIVector vectorWithX:1.0 Y:0.55] forKey:@"inputPoint4"];
+    [curve setValue:[CIVector vectorWithX:0.55 Y:0.14] forKey:@"inputPoint2"];
+    [curve setValue:[CIVector vectorWithX:0.75 Y:0.275] forKey:@"inputPoint3"];
+    [curve setValue:[CIVector vectorWithX:1.0 Y:0.275] forKey:@"inputPoint4"];
     CIContext *ctx = [CIContext contextWithOptions:nil];
     CGImageRef out = [ctx createCGImage:curve.outputImage fromRect:ci.extent];
     if (!out)
