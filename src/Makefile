@@ -226,6 +226,10 @@ install-saver: saver
 	codesign --force --sign "$(CODESIGN_IDENTITY)" $(CODESIGN_OPTS) "$(INSTALL_APP)"
 	pluginkit -a "$(INSTALL_APPEX)" || true
 	"$(INSTALL_APP)/Contents/MacOS/TheGibson" --register || true
+	@# Re-registering gives the extension a new plugin UUID; a running
+	@# WallpaperAgent keeps the stale one and the saver comes up black.
+	@pkill -x TheGibson 2>/dev/null || true
+	@killall WallpaperAgent 2>/dev/null || true
 	@echo "Installed $(INSTALL_APP)"
 	@echo "Open System Settings → Screen Saver and choose The Gibson."
 	@echo "Activity Monitor should show TheGibson, not legacyScreenSaver."

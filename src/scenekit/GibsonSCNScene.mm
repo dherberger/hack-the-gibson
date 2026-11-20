@@ -3,6 +3,7 @@
 
 #import <ModelIO/ModelIO.h>
 #import <SceneKit/ModelIO.h>
+#import <CoreImage/CoreImage.h>
 
 #include <algorithm>
 #include <cmath>
@@ -261,20 +262,86 @@ static GibsonSCNScene *g_fullWorld;
     [_worldRoot addChildNode:dirNode];
 }
 
+/* Floor: an SCNFloor with the
+ * circuit texture repeated FLOOR_REPEAT times per SCNFloor texture unit
+ * (1 is about the original room mesh's scale: one tile per ~9 towers).
+ * GIBSON_FLOOR_REPEAT overrides it for test renders. */
+#define FLOOR_REPEAT 2.f
+/* In the film the floor stays opaque and dark; only the glossy traces mirror
+ * the towers. SceneKit's SCNFloor reflection can't be masked per pixel, so:
+ *  - an upside-down copy of the towers sits under the floor (see addTowers);
+ *  - the floor's dark gaps are opaque, and its traces are partly see-through
+ *    (thresholded trace texture as an RGBZero transparency mask), so the
+ *    mirrored towers show only inside the traces.
+ * Drawing the towers twice costs ~30% more CPU, like a reflection pass. */
+#define GIBSON_ORDER_MIRROR (-10)
+#define GIBSON_ORDER_FLOOR (-5)
+
+static float gibson_env_float(const char *name, float fallback, float lo, float hi)
+{
+    const char *env = std::getenv(name);
+    if (!env)
+        return fallback;
+    const float v = (float)std::atof(env);
+    return (v >= lo && v <= hi) ? v : fallback;
+}
+
+/* The floor's transparency mask: the trace texture thresholded so the dark
+ * gaps (and the soft halo) are exactly 0 = opaque and the trace cores are
+ * bright = see-through to the mirrored towers below (RGBZero mode). */
+static NSImage *gibson_trace_mask_image(NSImage *src)
+{
+    CGImageRef cg = [src CGImageForProposedRect:NULL context:nil hints:nil];
+    if (!cg)
+        return src;
+    CIImage *ci = [CIImage imageWithCGImage:cg];
+    CIFilter *curve = [CIFilter filterWithName:@"CIToneCurve"];
+    [curve setValue:ci forKey:kCIInputImageKey];
+    [curve setValue:[CIVector vectorWithX:0.0 Y:0.0] forKey:@"inputPoint0"];
+    [curve setValue:[CIVector vectorWithX:0.35 Y:0.0] forKey:@"inputPoint1"];
+    [curve setValue:[CIVector vectorWithX:0.55 Y:0.28] forKey:@"inputPoint2"];
+    [curve setValue:[CIVector vectorWithX:0.75 Y:0.55] forKey:@"inputPoint3"];
+    [curve setValue:[CIVector vectorWithX:1.0 Y:0.55] forKey:@"inputPoint4"];
+    CIContext *ctx = [CIContext contextWithOptions:nil];
+    CGImageRef out = [ctx createCGImage:curve.outputImage fromRect:ci.extent];
+    if (!out)
+        return src;
+    NSImage *img = [[NSImage alloc] initWithCGImage:out size:src.size];
+    CGImageRelease(out);
+    return img;
+}
+
 - (void)addRoom
 {
-    SCNGeometry *geom = gibson_geometry_from_obj([self mediaItem:@"room.obj"]);
-    if (!geom)
-        return;
     NSImage *tex = [self imageNamed:@"room.png"];
+    if (!tex)
+        return;
+    const float repeat = gibson_env_float("GIBSON_FLOOR_REPEAT", FLOOR_REPEAT, 0.1f, 20.f);
+    const SCNMatrix4 tiling = SCNMatrix4MakeScale(repeat, repeat, 1.f);
+
     SCNMaterial *mat = gibson_unlit_material(tex, NO);
-    /* Pale cyan traces -> glowing blue-violet circuit lines. */
-    gibson_tint(mat, gibson_rgb(0.22, 0.30, 1.0), 0.95);
-    geom.materials = @[ mat ];
-    SCNNode *room = [SCNNode nodeWithGeometry:geom];
+    /* Pale traces -> dark royal-blue circuit lines. */
+    gibson_tint(mat, gibson_rgb(0.22, 0.30, 1.0), 0.8);
+    mat.diffuse.contentsTransform = tiling;
+    mat.multiply.contentsTransform = tiling;
+
+    /* Traces partly see-through to the mirrored towers; gaps opaque. */
+    mat.transparent.contents = gibson_trace_mask_image(tex);
+    mat.transparent.contentsTransform = tiling;
+    mat.transparent.wrapS = SCNWrapModeRepeat;
+    mat.transparent.wrapT = SCNWrapModeRepeat;
+    mat.transparencyMode = SCNTransparencyModeRGBZero;
+    mat.blendMode = SCNBlendModeAlpha;
+    mat.writesToDepthBuffer = NO;
+
+    SCNFloor *floor = [SCNFloor floor];
+    floor.reflectivity = 0.f;  /* no SceneKit reflection pass */
+    floor.materials = @[ mat ];
+
+    SCNNode *room = [SCNNode nodeWithGeometry:floor];
     room.name = @"room";
-    room.eulerAngles = SCNVector3Make(0, 0, (float)M_PI);
-    [_worldRoot addChildNode:room];
+    room.renderingOrder = GIBSON_ORDER_FLOOR;
+    [_scene.rootNode addChildNode:room];
 }
 
 - (void)addTowers
@@ -343,6 +410,24 @@ static GibsonSCNScene *g_fullWorld;
     gibson_bind_material(lightFlat, _lightTowerMat);
     [_worldRoot addChildNode:darkFlat];
     [_worldRoot addChildNode:lightFlat];
+
+    /* Fake reflection: the same towers flipped under the floor, showing only
+       through the floor's see-through traces (see addRoom). Shares geometry
+       and materials, so the text animation and hue shader apply too. */
+    SCNNode *mirror = [SCNNode node];
+    mirror.name = @"tower-mirror";
+    mirror.scale = SCNVector3Make(1, -1, 1);
+    for (SCNNode *flat in @[ darkFlat, lightFlat ])
+    {
+        SCNNode *copy = [SCNNode nodeWithGeometry:flat.geometry];
+        /* Fixed draw order: mirror, then the floor over it, then the real
+           towers. Left to SceneKit's distance sort, the mirror sometimes
+           lands on top of the floor when the camera turns. */
+        copy.renderingOrder = GIBSON_ORDER_MIRROR;
+        [mirror addChildNode:copy];
+    }
+    [_worldRoot addChildNode:mirror];
+
 }
 
 - (void)addPulses

@@ -115,8 +115,9 @@ static NSString *const kSaverDidStop = @"com.apple.screensaver.didstop";
     _scnView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     _scnView.wantsLayer = YES;
     _scnView.layer.opaque = YES;
-    /* Retina backing is 4x the pixels on this display; 1x is plenty for a saver. */
-    _scnView.layer.contentsScale = 1.0;
+    /* Render below 1x and let it upscale: the film's CG was soft anyway, and
+       fewer pixels keeps the bloom/blur/reflection passes cheap. */
+    _scnView.layer.contentsScale = 0.75;
     [GibsonSCNScene configureView:_scnView preview:self.isPreview mediaURL:media];
     _scnView.preferredFramesPerSecond = self.isPreview ? 30 : 60;
     _scnView.antialiasingMode = SCNAntialiasingModeNone;
