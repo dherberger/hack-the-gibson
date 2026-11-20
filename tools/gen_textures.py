@@ -169,6 +169,9 @@ def to_rgba(lum, alpha):
     return Image.fromarray(np.dstack([l8, l8, l8, a8]), "RGBA")
 
 
+BODY_TINT = 0.3           # 30% black over the tower glass bodies
+
+
 def tower_set(prefix, out, seed, dark):
     rng = random.Random(seed)
     font_px = 15 * SS
@@ -180,10 +183,16 @@ def tower_set(prefix, out, seed, dark):
     # towers are just a little lighter and clearer than "dark" ones.
     if dark:
         ink, bg, glass, base_glow, edge = 0.95, (0.03, 0.55), 0.55, 0.25, 1.0
-        cap = make_cap(rng, 0.30, 0.6)
+        cap_v, cap_a = 0.30, 0.6
     else:
         ink, bg, glass, base_glow, edge = 1.0, (0.10, 0.32), 0.32, 0.30, 1.0
-        cap = make_cap(rng, 0.45, 0.5)
+        cap_v, cap_a = 0.45, 0.5
+    # BODY_TINT: a black layer over the glass body (not the text), so less of
+    # the towers behind shows through: alpha -> a + t(1 - a), value -> v(1 - t)
+    t = BODY_TINT
+    bg = (bg[0] * (1 - t), bg[1] + t * (1 - bg[1]))
+    glass = glass + t * (1 - glass)
+    cap = make_cap(rng, cap_v * (1 - t), cap_a + t * (1 - cap_a))
     for f in range(FRAMES):
         frng = random.Random(seed * 100 + f)
         side = draw_items(items, size, font, frng, flicker=0.0 if f == 0 else 0.12, ink=ink, bg=bg,
