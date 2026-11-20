@@ -1,14 +1,12 @@
 #import "GibsonSCNScene.h"
 #import "GibsonSCNCamera.h"
 
-#import <Metal/Metal.h>
-#import <MetalKit/MetalKit.h>
 #import <ModelIO/ModelIO.h>
 #import <SceneKit/ModelIO.h>
+#import <CoreImage/CoreImage.h>
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <vector>
@@ -21,6 +19,20 @@
 #define MAX_PULSE_SPEED 200.f
 #define MIN_PULSE_SPEED 120.f
 #define MAX_PULSE_HEIGHT 15.f
+/* Tower footprint scale (base mesh is 9.125 units wide on a 30-unit grid).
+   The flight path keeps >= 1.5 units of clearance up to 1.9. */
+#define TOWER_FOOTPRINT 1.6f
+#define TOWER_HEIGHT 1.265f       /* 15% taller than the original 1.1 */
+/* towers.obj spans y -12.69..21.69; keep the base on the floor (y ~0.04). */
+#define TOWER_MESH_BOTTOM (-12.6916f)
+#define TOWER_BASE_Y 0.04f
+
+static float gibson_tower_footprint(void)
+{
+    const char *env = std::getenv("GIBSON_TOWER_SCALE");  /* dev override */
+    const float v = env ? (float)std::atof(env) : 0.f;
+    return (v > 0.5f && v < 2.5f) ? v : TOWER_FOOTPRINT;
+}
 
 static float gibson_rand(float low, float high)
 {
@@ -55,162 +67,6 @@ static SCNGeometry *gibson_geometry_from_obj(NSURL *url)
     return nil;
 }
 
-static void gibson_metal_log(NSString *msg)
-{
-    NSLog(@"The Gibson Metal: %@", msg);
-    FILE *fp = fopen("/tmp/gibson-saver.log", "a");
-    if (fp)
-    {
-        fprintf(fp, "%s\n", msg.UTF8String);
-        fclose(fp);
-    }
-}
-
-static NSURL *gibson_shader_file_url(NSString *name, NSString *ext)
-{
-    NSMutableArray<NSURL *> *candidates = [NSMutableArray array];
-    NSBundle *classBundle = [NSBundle bundleForClass:[GibsonSCNScene class]];
-    NSURL *fromClass = [classBundle URLForResource:name withExtension:ext];
-    if (fromClass)
-        [candidates addObject:fromClass];
-    NSBundle *main = [NSBundle mainBundle];
-    NSURL *fromMain = [main URLForResource:name withExtension:ext];
-    if (fromMain)
-        [candidates addObject:fromMain];
-
-    NSMutableArray<NSString *> *dirs = [NSMutableArray array];
-    auto addDir = ^(NSString *dir) {
-        if (dir.length)
-            [dirs addObject:dir];
-    };
-    addDir(classBundle.bundlePath);
-    addDir(classBundle.resourcePath);
-    addDir(main.bundlePath);
-    addDir(main.resourcePath);
-    addDir([[NSFileManager defaultManager] currentDirectoryPath]);
-    addDir([[[NSFileManager defaultManager] currentDirectoryPath]
-               stringByAppendingPathComponent:@"src"]);
-    addDir([[[[NSFileManager defaultManager] currentDirectoryPath]
-                stringByAppendingPathComponent:@"src"]
-               stringByAppendingPathComponent:@"scenekit"]);
-    NSString *exe = [[NSProcessInfo processInfo] arguments].firstObject;
-    if (exe.length)
-    {
-        NSString *exeDir = [exe stringByDeletingLastPathComponent];
-        addDir(exeDir);
-        addDir([exeDir stringByAppendingPathComponent:@"scenekit"]);
-    }
-
-    NSString *filename = [name stringByAppendingPathExtension:ext];
-    for (NSString *dir in dirs)
-        [candidates addObject:[NSURL fileURLWithPath:
-            [[dir stringByAppendingPathComponent:filename] stringByStandardizingPath]]];
-
-    NSFileManager *fm = [NSFileManager defaultManager];
-    for (NSURL *url in candidates)
-    {
-        if (url.isFileURL && [fm fileExistsAtPath:url.path])
-            return url;
-    }
-    return nil;
-}
-
-static id<MTLLibrary> gibson_shader_library(void)
-{
-    static id<MTLLibrary> library;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-        if (!device)
-        {
-            gibson_metal_log(@"no Metal device");
-            return;
-        }
-        NSError *err = nil;
-        NSURL *libURL = gibson_shader_file_url(@"Gibson", @"metallib");
-        if (libURL)
-        {
-            library = [device newLibraryWithURL:libURL error:&err];
-            if (library)
-            {
-                gibson_metal_log([NSString stringWithFormat:@"loaded %@", libURL.path]);
-                return;
-            }
-            gibson_metal_log([NSString stringWithFormat:@"metallib load failed: %@", err]);
-            err = nil;
-        }
-        NSURL *srcURL = gibson_shader_file_url(@"GibsonShaders", @"metal");
-        if (!srcURL)
-        {
-            gibson_metal_log(@"GibsonShaders.metal not found");
-            return;
-        }
-        NSString *source = [NSString stringWithContentsOfURL:srcURL
-                                                    encoding:NSUTF8StringEncoding
-                                                       error:&err];
-        if (!source)
-        {
-            gibson_metal_log([NSString stringWithFormat:@"could not read %@: %@", srcURL.path, err]);
-            return;
-        }
-        MTLCompileOptions *opts = [[MTLCompileOptions alloc] init];
-        library = [device newLibraryWithSource:source options:opts error:&err];
-        if (!library)
-            gibson_metal_log([NSString stringWithFormat:@"Metal compile failed: %@", err]);
-        else
-            gibson_metal_log([NSString stringWithFormat:@"compiled %@", srcURL.path]);
-    });
-    return library;
-}
-
-static void gibson_bind_material(SCNNode *node, SCNMaterial *mat)
-{
-    if (node.geometry)
-        node.geometry.materials = @[ mat ];
-    for (SCNNode *child in node.childNodes)
-        gibson_bind_material(child, mat);
-}
-
-static void gibson_apply_floor_program(SCNMaterial *mat, id<SCNProgramDelegate> delegate)
-{
-    id<MTLLibrary> library = gibson_shader_library();
-    if (!library)
-        return;
-
-    SCNProgram *program = [SCNProgram program];
-    program.library = library;
-    program.vertexFunctionName = @"gibsonFloorVertex";
-    program.fragmentFunctionName = @"gibsonFloorFragment";
-    program.opaque = YES;
-    program.delegate = delegate;
-    mat.program = program;
-    [mat setValue:mat.diffuse forKey:@"diffuseTexture"];
-}
-
-static id gibson_floor_texture_contents(NSImage *image)
-{
-    if (!image)
-        return nil;
-    CGImageRef cg = [image CGImageForProposedRect:NULL context:nil hints:nil];
-    if (!cg)
-        return image;
-    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-    MTKTextureLoader *loader = [[MTKTextureLoader alloc] initWithDevice:device];
-    NSError *err = nil;
-    id<MTLTexture> tex = [loader newTextureWithCGImage:cg
-                                               options:@{
-        MTKTextureLoaderOptionSRGB : @NO,
-        MTKTextureLoaderOptionGenerateMipmaps : @YES
-    }
-                                                 error:&err];
-    if (!tex)
-    {
-        gibson_metal_log([NSString stringWithFormat:@"floor texture load failed: %@", err]);
-        return (__bridge id)cg;
-    }
-    return tex;
-}
-
 static SCNMaterial *gibson_unlit_material(id contents, BOOL alpha)
 {
     SCNMaterial *mat = [SCNMaterial material];
@@ -232,18 +88,59 @@ static SCNMaterial *gibson_unlit_material(id contents, BOOL alpha)
     return mat;
 }
 
-@interface GibsonSCNScene () <SCNProgramDelegate>
-@end
+/* Movie grade (phase 1). Constant-lit materials output diffuse * multiply *
+ * intensity, so these set the hue and how hard each element hits the bloom. */
+static NSColor *gibson_rgb(CGFloat r, CGFloat g, CGFloat b)
+{
+    return [NSColor colorWithCalibratedRed:r green:g blue:b alpha:1.0];
+}
+
+static void gibson_tint(SCNMaterial *mat, NSColor *color, CGFloat intensity)
+{
+    mat.multiply.contents = color;
+    mat.diffuse.intensity = intensity;
+}
+
+/* Towers shift between electric blue and cyan instead of one static tint:
+ *  - viewing angle: faces seen edge-on go cyan, head-on faces lean blue;
+ *  - a slow color wave drifting through the city over time;
+ *  - world position, so neighboring towers aren't in lockstep.
+ * `phase` offsets the wave so dark and light towers differ slightly. */
+static NSString *gibson_tower_hue_shader(float phase)
+{
+    return [NSString stringWithFormat:@
+        "#pragma body\n"
+        "float3 gWorld = (scn_frame.inverseViewTransform * float4(_surface.position, 1.0)).xyz;\n"
+        "float gFacing = abs(dot(normalize(_surface.normal), normalize(_surface.view)));\n"
+        "float gEdgeOn = pow(1.0 - gFacing, 1.5);\n"
+        "float gWave = 0.5 + 0.5 * sin(scn_frame.time * 0.5 + %.3f\n"
+        "                               + gWorld.x * 0.035 + gWorld.z * 0.045);\n"
+        "float gMix = smoothstep(0.15, 0.85, 0.75 * gWave + 0.55 * gEdgeOn);\n"
+        "float3 gBlue = float3(0.10, 0.32, 1.0);\n"
+        "float3 gCyan = float3(0.38, 0.88, 1.0);\n"
+        "float3 gTint = mix(gBlue, gCyan, gMix);\n"
+        /* The brightest texels (text cores, outlines) go pale cyan-white like
+           the movie's electric highlights; dim glass keeps the hue shift. */
+        "float gLum = max(_output.color.r, max(_output.color.g, _output.color.b));\n"
+        "float gHot = smoothstep(0.75, 1.4, gLum);\n"
+        "gTint = mix(gTint, float3(0.70, 0.97, 1.0), gHot * 0.75);\n"
+        "_output.color.rgb *= gTint;\n",
+        phase];
+}
 
 @implementation GibsonSCNScene
 {
     NSURL *_mediaURL;
     GibsonSCNCamera *_flyCam;
     SCNNode *_worldRoot;
-    SCNMaterial *_darkTowerMat;
-    SCNMaterial *_lightTowerMat;
-    NSArray<NSImage *> *_darkFrames;
-    NSArray<NSImage *> *_lightFrames;
+    /* Every tower node of a type shares one geometry. The text animation
+       swaps that geometry's material between one prebuilt material per frame:
+       assigning a new image to a live material instead makes SceneKit
+       re-process the bitmap on every swap. */
+    SCNGeometry *_darkTowers;
+    SCNGeometry *_lightTowers;
+    NSArray<SCNMaterial *> *_darkTowerMats;
+    NSArray<SCNMaterial *> *_lightTowerMats;
     NSInteger _towerFrame;
     NSTimeInterval _lastTowerSwap;
     NSTimeInterval _startTime;
@@ -279,10 +176,7 @@ static GibsonSCNScene *g_fullWorld;
     view.rendersContinuously = YES;
     view.allowsCameraControl = NO;
     view.autoenablesDefaultLighting = NO;
-    view.backgroundColor = [NSColor colorWithCalibratedRed:0.0
-                                                     green:10.0 / 255.0
-                                                      blue:15.0 / 255.0
-                                                     alpha:1.0];
+    view.backgroundColor = [NSColor blackColor];
     view.antialiasingMode = SCNAntialiasingModeNone;
     view.preferredFramesPerSecond = preview ? 30 : 60;
     view.jitteringEnabled = NO;
@@ -312,19 +206,13 @@ static GibsonSCNScene *g_fullWorld;
     std::srand((unsigned)std::time(nullptr));
 
     _scene = [SCNScene scene];
-    _scene.background.contents = [NSColor colorWithCalibratedRed:0.0
-                                                           green:10.0 / 255.0
-                                                            blue:15.0 / 255.0
-                                                           alpha:1.0];
+    _scene.background.contents = [NSColor blackColor];
     /* City edge is ~900 units out. Fade to the clear color before that so the
        grid never shows a hard wall of towers. */
     _scene.fogStartDistance = 480;
     _scene.fogEndDistance = 820;
     _scene.fogDensityExponent = 2.0;
-    _scene.fogColor = [NSColor colorWithCalibratedRed:0.0
-                                               green:10.0 / 255.0
-                                                blue:15.0 / 255.0
-                                               alpha:1.0];
+    _scene.fogColor = [NSColor blackColor];
     _scene.fogDensityExponent = 1.0;
 
     /* Irrlicht is left-handed; SceneKit is right-handed. Flip Z so authored
@@ -373,43 +261,124 @@ static GibsonSCNScene *g_fullWorld;
     [_worldRoot addChildNode:dirNode];
 }
 
+/* Floor: an SCNFloor with the
+ * circuit texture repeated FLOOR_REPEAT times per SCNFloor texture unit
+ * (1 is about the original room mesh's scale: one tile per ~9 towers).
+ * GIBSON_FLOOR_REPEAT overrides it for test renders. */
+#define FLOOR_REPEAT 1.f  /* media/room.png is a 2016 px tile (tools/gen_textures.py --floor pcb) */
+/* In the film the floor stays opaque and dark; only the glossy traces mirror
+ * the towers. SceneKit's SCNFloor reflection can't be masked per pixel, so:
+ *  - an upside-down copy of the towers sits under the floor (see addTowers);
+ *  - the floor's dark gaps are opaque, and its traces are partly see-through
+ *    (thresholded trace texture as an RGBZero transparency mask), so the
+ *    mirrored towers show only inside the traces.
+ * Drawing the towers twice roughly doubles their draw calls, like a
+ * reflection pass. */
+#define GIBSON_ORDER_MIRROR (-10)
+#define GIBSON_ORDER_FLOOR (-5)
+
+static float gibson_env_float(const char *name, float fallback, float lo, float hi)
+{
+    const char *env = std::getenv(name);
+    if (!env)
+        return fallback;
+    const float v = (float)std::atof(env);
+    return (v >= lo && v <= hi) ? v : fallback;
+}
+
+/* The floor's transparency mask: the trace texture thresholded so the dark
+ * gaps (and the soft halo) are exactly 0 = opaque and the trace cores are
+ * bright = see-through to the mirrored towers below (RGBZero mode). Trace
+ * cores are at most 27.5% see-through (the last points of the curve). */
+static NSImage *gibson_trace_mask_image(NSImage *src)
+{
+    CGImageRef cg = [src CGImageForProposedRect:NULL context:nil hints:nil];
+    if (!cg)
+        return src;
+    CIImage *ci = [CIImage imageWithCGImage:cg];
+    CIFilter *curve = [CIFilter filterWithName:@"CIToneCurve"];
+    [curve setValue:ci forKey:kCIInputImageKey];
+    [curve setValue:[CIVector vectorWithX:0.0 Y:0.0] forKey:@"inputPoint0"];
+    [curve setValue:[CIVector vectorWithX:0.35 Y:0.0] forKey:@"inputPoint1"];
+    [curve setValue:[CIVector vectorWithX:0.55 Y:0.14] forKey:@"inputPoint2"];
+    [curve setValue:[CIVector vectorWithX:0.75 Y:0.275] forKey:@"inputPoint3"];
+    [curve setValue:[CIVector vectorWithX:1.0 Y:0.275] forKey:@"inputPoint4"];
+    CIContext *ctx = [CIContext contextWithOptions:nil];
+    CGImageRef out = [ctx createCGImage:curve.outputImage fromRect:ci.extent];
+    if (!out)
+        return src;
+    NSImage *img = [[NSImage alloc] initWithCGImage:out size:src.size];
+    CGImageRelease(out);
+    return img;
+}
+
 - (void)addRoom
 {
-    SCNGeometry *geom = gibson_geometry_from_obj([self mediaItem:@"room.obj"]);
-    if (!geom)
-        return;
     NSImage *tex = [self imageNamed:@"room.png"];
-    SCNMaterial *mat = gibson_unlit_material(gibson_floor_texture_contents(tex), NO);
-    gibson_apply_floor_program(mat, self);
-    geom.materials = @[ mat ];
-    SCNNode *room = [SCNNode nodeWithGeometry:geom];
+    if (!tex)
+        return;
+    const float repeat = gibson_env_float("GIBSON_FLOOR_REPEAT", FLOOR_REPEAT, 0.1f, 20.f);
+    const SCNMatrix4 tiling = SCNMatrix4MakeScale(repeat, repeat, 1.f);
+
+    SCNMaterial *mat = gibson_unlit_material(tex, NO);
+    /* Pale traces -> dark royal-blue circuit lines. */
+    gibson_tint(mat, gibson_rgb(0.22, 0.30, 1.0), 0.8);
+    mat.diffuse.contentsTransform = tiling;
+    mat.multiply.contentsTransform = tiling;
+
+    /* Traces partly see-through to the mirrored towers; gaps opaque. */
+    mat.transparent.contents = gibson_trace_mask_image(tex);
+    mat.transparent.contentsTransform = tiling;
+    mat.transparent.wrapS = SCNWrapModeRepeat;
+    mat.transparent.wrapT = SCNWrapModeRepeat;
+    mat.transparencyMode = SCNTransparencyModeRGBZero;
+    mat.blendMode = SCNBlendModeAlpha;
+    mat.writesToDepthBuffer = NO;
+
+    SCNFloor *floor = [SCNFloor floor];
+    floor.reflectivity = 0.f;  /* no SceneKit reflection pass */
+    floor.materials = @[ mat ];
+
+    SCNNode *room = [SCNNode nodeWithGeometry:floor];
     room.name = @"room";
-    room.eulerAngles = SCNVector3Make(0, 0, (float)M_PI);
-    [_worldRoot addChildNode:room];
+    room.renderingOrder = GIBSON_ORDER_FLOOR;
+    [_scene.rootNode addChildNode:room];
+}
+
+- (SCNMaterial *)towerMaterialNamed:(NSString *)name intensity:(CGFloat)intensity phase:(float)phase
+{
+    SCNMaterial *mat = gibson_unlit_material([self imageNamed:name], YES);
+    /* Grey-teal glass -> saturated electric cyan. Hue comes from the shader
+       modifier; multiply stays white. */
+    gibson_tint(mat, [NSColor whiteColor], intensity);
+    mat.shaderModifiers = @{ SCNShaderModifierEntryPointFragment : gibson_tower_hue_shader(phase) };
+    return mat;
 }
 
 - (void)addTowers
 {
-    NSMutableArray<NSImage *> *dark = [NSMutableArray arrayWithCapacity:TOWER_TEXTURE_COUNT];
-    NSMutableArray<NSImage *> *light = [NSMutableArray arrayWithCapacity:TOWER_TEXTURE_COUNT];
-    for (int i = 1; i <= TOWER_TEXTURE_COUNT; ++i)
-    {
-        [dark addObject:[self imageNamed:[NSString stringWithFormat:@"towers1-%d.png", i]]];
-        [light addObject:[self imageNamed:[NSString stringWithFormat:@"towers2-%d.png", i]]];
-    }
-    _darkFrames = dark;
-    _lightFrames = light;
-
     SCNGeometry *geom = gibson_geometry_from_obj([self mediaItem:@"towers.obj"]);
     if (!geom)
         return;
 
-    _darkTowerMat = gibson_unlit_material(dark[0], YES);
-    _lightTowerMat = gibson_unlit_material(light[0], YES);
+    NSMutableArray<SCNMaterial *> *dark = [NSMutableArray arrayWithCapacity:TOWER_TEXTURE_COUNT];
+    NSMutableArray<SCNMaterial *> *light = [NSMutableArray arrayWithCapacity:TOWER_TEXTURE_COUNT];
+    for (int i = 1; i <= TOWER_TEXTURE_COUNT; ++i)
+    {
+        [dark addObject:[self towerMaterialNamed:[NSString stringWithFormat:@"towers1-%d.png", i]
+                                       intensity:1.45 phase:0.0f]];
+        [light addObject:[self towerMaterialNamed:[NSString stringWithFormat:@"towers2-%d.png", i]
+                                        intensity:1.6 phase:1.7f]];
+    }
+    _darkTowerMats = dark;
+    _lightTowerMats = light;
+
     SCNGeometry *darkGeom = [geom copy];
-    darkGeom.materials = @[ _darkTowerMat ];
+    darkGeom.materials = @[ dark[0] ];
     SCNGeometry *lightGeom = [geom copy];
-    lightGeom.materials = @[ _lightTowerMat ];
+    lightGeom.materials = @[ light[0] ];
+    _darkTowers = darkGeom;
+    _lightTowers = lightGeom;
 
     SCNNode *darkGroup = [SCNNode node];
     SCNNode *lightGroup = [SCNNode node];
@@ -417,10 +386,11 @@ static GibsonSCNScene *g_fullWorld;
     float x = -((_gridX / 2) * TOWER_DIST);
     float z = ((_gridY / 2) * TOWER_DIST);
 
+    const float footprint = gibson_tower_footprint();
     auto place = ^(SCNGeometry *g, SCNNode *parent, float px, float pz) {
         SCNNode *tower = [SCNNode nodeWithGeometry:g];
-        tower.scale = SCNVector3Make(1.3f, 1.1f, 1.3f);
-        tower.position = SCNVector3Make(px, 14.f, pz);
+        tower.scale = SCNVector3Make(footprint, TOWER_HEIGHT, footprint);
+        tower.position = SCNVector3Make(px, TOWER_BASE_Y - TOWER_MESH_BOTTOM * TOWER_HEIGHT, pz);
         [parent addChildNode:tower];
     };
 
@@ -439,12 +409,32 @@ static GibsonSCNScene *g_fullWorld;
               x + TOWER_DIST / 2.f, z);
     }
 
-    SCNNode *darkFlat = [darkGroup flattenedClone];
-    SCNNode *lightFlat = [lightGroup flattenedClone];
-    gibson_bind_material(darkFlat, _darkTowerMat);
-    gibson_bind_material(lightFlat, _lightTowerMat);
-    [_worldRoot addChildNode:darkFlat];
-    [_worldRoot addChildNode:lightFlat];
+    /* One node per tower, not -flattenedClone. The glass only looks right
+       drawn back to front, tower by tower, and SceneKit sorts a flattened
+       clone that way too, but it draws all 3600 towers every frame. Separate
+       nodes get the same sort plus frustum culling, at about half the CPU.
+       (A single merged mesh is far cheaper still, but draws in a fixed order,
+       so near glass hides the towers behind it.) */
+    [_worldRoot addChildNode:darkGroup];
+    [_worldRoot addChildNode:lightGroup];
+
+    /* Fake reflection: the same towers flipped under the floor, showing only
+       through the floor's see-through traces (see addRoom). Shares geometry
+       and materials, so the text animation and hue shader apply too. */
+    SCNNode *mirror = [SCNNode node];
+    mirror.name = @"tower-mirror";
+    mirror.scale = SCNVector3Make(1, -1, 1);
+    for (SCNNode *group in @[ darkGroup, lightGroup ])
+    {
+        SCNNode *copy = [group clone];
+        /* Fixed draw order: mirror, then the floor over it, then the real
+           towers. Left to SceneKit's distance sort, the mirror sometimes
+           lands on top of the floor when the camera turns. */
+        for (SCNNode *tower in copy.childNodes)
+            tower.renderingOrder = GIBSON_ORDER_MIRROR;
+        [mirror addChildNode:copy];
+    }
+    [_worldRoot addChildNode:mirror];
 }
 
 - (void)addPulses
@@ -454,6 +444,10 @@ static GibsonSCNScene *g_fullWorld;
         return;
     NSImage *tex = [self imageNamed:@"pulse.png"];
     SCNMaterial *mat = gibson_unlit_material(tex, YES);
+    /* Purple blobs -> long cyan-white streaks that bloom. */
+    gibson_tint(mat, gibson_rgb(0.55, 0.95, 1.0), 4.0);
+    mat.blendMode = SCNBlendModeAdd;
+    mat.writesToDepthBuffer = NO;
     geom.materials = @[ mat ];
 
     const int count = _preview ? 80 : 280;
@@ -462,7 +456,7 @@ static GibsonSCNScene *g_fullWorld;
     for (int i = 0; i < count; ++i)
     {
         SCNNode *pulse = [SCNNode nodeWithGeometry:geom];
-        pulse.scale = SCNVector3Make(2.f, 2.f, 4.f);
+        pulse.scale = SCNVector3Make(1.6f, 1.6f, 10.f);
         [self respawnPulse:pulse];
         [_worldRoot addChildNode:pulse];
         _pulses.push_back(pulse);
@@ -487,12 +481,6 @@ static GibsonSCNScene *g_fullWorld;
 {
     (void)renderer;
     [self tickAtTime:time];
-}
-
-- (void)program:(SCNProgram *)program handleError:(NSError *)error
-{
-    (void)program;
-    gibson_metal_log([NSString stringWithFormat:@"SCNProgram error: %@", error]);
 }
 
 - (void)resetClock
@@ -527,18 +515,8 @@ static GibsonSCNScene *g_fullWorld;
         return;
     _lastTowerSwap = time;
     _towerFrame = (_towerFrame + 1) % TOWER_TEXTURE_COUNT;
-    if (_darkFrames.count)
-    {
-        id frame = _darkFrames[_towerFrame];
-        _darkTowerMat.diffuse.contents = frame;
-        _darkTowerMat.transparent.contents = frame;
-    }
-    if (_lightFrames.count)
-    {
-        id frame = _lightFrames[_towerFrame];
-        _lightTowerMat.diffuse.contents = frame;
-        _lightTowerMat.transparent.contents = frame;
-    }
+    _darkTowers.materials = @[ _darkTowerMats[_towerFrame] ];
+    _lightTowers.materials = @[ _lightTowerMats[_towerFrame] ];
 }
 
 - (void)updatePulses:(float)delta

@@ -57,16 +57,31 @@ The Makefile locates Irrlicht through Homebrew (`/opt/homebrew` on Apple Silicon
 
 ## Screensaver
 
-Build a macOS `.saver` bundle that System Settings can load. The saver is SceneKit/Metal and does not need Homebrew at runtime.
+Build a macOS Screen Saver **app extension** (`.appex`) hosted by `TheGibson.app`. This is the same format Apple’s built-in savers use, so it runs as its own process instead of inside `legacyScreenSaver`. Requires macOS 14+. SceneKit/Metal; no Homebrew at runtime.
 
 ```bash
 make saver
 make install-saver
 ```
 
-That copies `dist/Gibson.saver` to `~/Library/Screen Savers/Gibson.saver`. Then fully quit System Settings, reopen it, and choose **The Gibson**.
+That copies `dist/TheGibson.app` to `/Applications/TheGibson.app` and registers the extension with `pluginkit`. Fully quit System Settings, reopen it, and choose **The Gibson** (it sits with the first-party savers, not under Other).
 
-The System Settings preview uses a smaller tower grid. The lock-screen saver uses the full flythrough.
+The host app is a SceneKit preview window. Opening the copy in `/Applications` also re-registers the extension. Camera speed still lives in `~/Library/Application Support/TheGibson/config.txt`.
+
+To set it as the idle / hot-corner saver as well:
+
+```bash
+make enable-saver
+```
+
+Signing uses a **Developer ID Application** identity if one is in your keychain, then Apple Development, then ad-hoc. Other Macs you own need a certificate:
+
+1. [developer.apple.com](https://developer.apple.com/account/resources/certificates) → **Developer ID Application**
+2. Download and double-click to add it to Keychain
+3. Rebuild: `make install-saver`
+4. To Gatekeeper-pass a copy: `xcrun notarytool store-credentials AC_PASSWORD --apple-id you@email.com --team-id TEAMID` then `make notarize NOTARY_PROFILE=AC_PASSWORD`
+
+The old `.saver` plug-in is still available as `make legacy-saver` (installs under Other via `legacyScreenSaver`). `make install-saver` removes it so only the modern extension is registered.
 
 To iterate on the SceneKit scene without opening System Settings:
 
@@ -89,7 +104,7 @@ Remove the screensaver with `make uninstall-saver`.
 
 # Known Issues
 
-1. The windowed app still uses Irrlicht's deprecated OpenGL path. The screensaver is SceneKit/Metal. If the System Settings preview is stale, fully quit System Settings and reopen it so it reloads the `.saver` bundle.
+1. The windowed app still uses Irrlicht's deprecated OpenGL path. The screensaver is SceneKit/Metal. If the System Settings preview is stale, fully quit System Settings and reopen it so it reloads the extension. After a rebuild, `make install-saver` again so `/Applications/TheGibson.app` is the only copy `pluginkit` knows about.
 
 
 # Credit
