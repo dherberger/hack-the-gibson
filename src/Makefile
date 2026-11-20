@@ -185,7 +185,7 @@ $(APPEX_BIN): $(SCN_OBJS) $(SAVER_OBJS) $(APPEX_OBJS) saver/TheGibson.appex.plis
 	mkdir -p "$(APPEX_DIR)/Contents/MacOS" "$(APPEX_DIR)/Contents/Resources/media"
 	cp saver/TheGibson.appex.plist "$(APPEX_DIR)/Contents/Info.plist"
 	printf 'XPC!????' > "$(APPEX_DIR)/Contents/PkgInfo"
-	rsync -a --exclude '*.xcf' --exclude 'screenshot*' --exclude '*_src.png' "$(ROOT)/media/" "$(APPEX_DIR)/Contents/Resources/media/"
+	rsync -a --exclude '*.xcf' --exclude 'screenshot*' --exclude '*_src.png' --exclude '*_traces.png' "$(ROOT)/media/" "$(APPEX_DIR)/Contents/Resources/media/"
 	cp "$(ROOT)/config.txt" "$(APPEX_DIR)/Contents/Resources/config.txt"
 	sips -z 65 107 "$(ROOT)/media/screenshot1.png" --out "$(APPEX_DIR)/Contents/Resources/thumbnail.png" >/dev/null
 	sips -z 130 214 "$(ROOT)/media/screenshot1.png" --out "$(APPEX_DIR)/Contents/Resources/thumbnail@2x.png" >/dev/null
@@ -250,7 +250,7 @@ $(LEGACY_SAVER_BIN): $(SCN_OBJS) $(SAVER_OBJS) saver/Info.plist $(ROOT)/config.t
 	mkdir -p "$(LEGACY_SAVER_DIR)/Contents/MacOS" "$(LEGACY_SAVER_DIR)/Contents/Resources/media"
 	cp saver/Info.plist "$(LEGACY_SAVER_DIR)/Contents/Info.plist"
 	printf 'BNDL????' > "$(LEGACY_SAVER_DIR)/Contents/PkgInfo"
-	rsync -a --exclude '*.xcf' --exclude 'screenshot*' --exclude '*_src.png' "$(ROOT)/media/" "$(LEGACY_SAVER_DIR)/Contents/Resources/media/"
+	rsync -a --exclude '*.xcf' --exclude 'screenshot*' --exclude '*_src.png' --exclude '*_traces.png' "$(ROOT)/media/" "$(LEGACY_SAVER_DIR)/Contents/Resources/media/"
 	cp "$(ROOT)/config.txt" "$(LEGACY_SAVER_DIR)/Contents/Resources/config.txt"
 	$(CXX) $(CXXFLAGS) -fobjc-arc -mmacosx-version-min=$(LEGACY_SAVER_MIN_OS) -bundle \
 		-o "$(LEGACY_SAVER_BIN)" $(SCN_OBJS) $(SAVER_OBJS) $(SAVER_SCN_LIBS)

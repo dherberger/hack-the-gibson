@@ -47,3 +47,5 @@ tools/.venv/
 
 # Local reference/comparison frames (scn_preview --sequence, movie stills)
 compare/
+__pycache__/
+media/room_traces.png

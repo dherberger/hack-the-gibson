@@ -266,7 +266,7 @@ static GibsonSCNScene *g_fullWorld;
  * circuit texture repeated FLOOR_REPEAT times per SCNFloor texture unit
  * (1 is about the original room mesh's scale: one tile per ~9 towers).
  * GIBSON_FLOOR_REPEAT overrides it for test renders. */
-#define FLOOR_REPEAT 2.f
+#define FLOOR_REPEAT 1.f  /* media/room.png is a 2016 px tile (tools/gen_textures.py --floor pcb) */
 /* In the film the floor stays opaque and dark; only the glossy traces mirror
  * the towers. SceneKit's SCNFloor reflection can't be masked per pixel, so:
  *  - an upside-down copy of the towers sits under the floor (see addTowers);
