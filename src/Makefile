@@ -15,7 +15,7 @@ LEGACY_SAVER_MIN_OS ?= 11.0
 # Objects linked into both the appex (14.0) and the legacy saver (11.0).
 SHARED_MIN_OS ?= $(LEGACY_SAVER_MIN_OS)
 
-SAVER_MM = saver/GibsonSaverView.mm
+SAVER_MM = saver/GibsonSaverView.mm saver/GibsonMusic.mm
 APPEX_MM = \
 	saver/GibsonScreenSaverExtension.mm \
 	saver/GibsonScreenSaverViewController.mm
@@ -36,7 +36,7 @@ SCN_INCLUDES = -I. -Iscenekit -Isaver
 SCN_FRAMEWORKS = SceneKit ModelIO QuartzCore Metal Cocoa Foundation AppKit CoreGraphics
 SAVER_SCN_LIBS = \
 	-Wl,-ObjC \
-	$(foreach n,$(SCN_FRAMEWORKS) ScreenSaver Foundation,-framework $n)
+	$(foreach n,$(SCN_FRAMEWORKS) ScreenSaver Foundation AVFoundation,-framework $n)
 APPEX_LIBS = $(SAVER_SCN_LIBS) -framework ExtensionFoundation
 PREVIEW_LIBS = \
 	$(foreach n,$(SCN_FRAMEWORKS),-framework $n)

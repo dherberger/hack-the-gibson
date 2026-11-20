@@ -1,4 +1,5 @@
 #import "GibsonSaverView.h"
+#import "GibsonMusic.h"
 #import "GibsonSCNScene.h"
 
 #import <QuartzCore/QuartzCore.h>
@@ -36,7 +37,12 @@ static NSString *const kSaverDidStop = @"com.apple.screensaver.didstop";
 {
     SCNView *_scnView;
     BOOL _sessionActive;
+    BOOL _musicActive;
 }
+
+/* Music only for a real full-screen session: System Settings' thumbnail
+ * instance never gets a sized window, so it stays silent. */
+static const CGFloat kMusicMinWidth = 400;
 
 + (BOOL)performGammaFade
 {
@@ -92,6 +98,8 @@ static NSString *const kSaverDidStop = @"com.apple.screensaver.didstop";
 - (void)dealloc
 {
     [[NSDistributedNotificationCenter defaultCenter] removeObserver:self];
+    if (_musicActive)
+        [[GibsonMusic shared] viewDidStop];
     gibson_log(@"dealloc");
 }
 
@@ -133,6 +141,25 @@ static NSString *const kSaverDidStop = @"com.apple.screensaver.didstop";
     _scnView.rendersContinuously = playing;
 }
 
+- (void)updateMusic
+{
+    const BOOL want = _sessionActive && !self.isPreview && self.window != nil
+        && self.bounds.size.width >= kMusicMinWidth;
+    if (want == _musicActive)
+        return;
+    _musicActive = want;
+    if (want)
+        [[GibsonMusic shared] viewDidStart];
+    else
+        [[GibsonMusic shared] viewDidStop];
+}
+
+- (void)setFrameSize:(NSSize)newSize
+{
+    [super setFrameSize:newSize];
+    [self updateMusic];   // the host sizes the view after attaching it
+}
+
 /* Idempotent: called from -viewDidMoveToWindow, -startAnimation and didstart,
  * whichever the host happens to deliver. */
 - (void)beginSession:(NSString *)reason
@@ -150,6 +177,7 @@ static NSString *const kSaverDidStop = @"com.apple.screensaver.didstop";
     [self attachSceneIfNeeded];
     [[GibsonSCNScene sharedWorldForPreview:self.isPreview mediaURL:[self mediaURL]] resetClock];
     [self setPlaying:YES];
+    [self updateMusic];
 }
 
 - (void)endSession:(NSString *)reason
@@ -158,6 +186,7 @@ static NSString *const kSaverDidStop = @"com.apple.screensaver.didstop";
         return;
     _sessionActive = NO;
     [self setPlaying:NO];
+    [self updateMusic];
     gibson_log([NSString stringWithFormat:@"end (%@)", reason]);
 }
 

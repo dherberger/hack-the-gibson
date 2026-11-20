@@ -108,7 +108,8 @@ screensaver extension, which helps if System Settings loses track of it.
 
 ## Settings
 
-Camera speed and banking live in a plain-text file, created on first install:
+Camera, banking and music settings live in a plain-text file, created on
+first install:
 
 ```
 ~/Library/Application Support/TheGibson/config.txt
@@ -120,9 +121,29 @@ Camera speed and banking live in a plain-text file, created on first install:
 | `bank_strength` | `0.45` | How hard the camera leans into turns; `0` keeps it level, and a negative value flips the direction. |
 | `bank_max_degrees` | `32` | The most it will roll, in degrees (0–90). |
 | `bank_smoothing` | `0.55` | Seconds of lag on the roll. Higher is smoother. |
+| `music` | `music.mp3` | Audio file to loop while the screensaver runs (see [Music](#music)). `off` for silence. |
+| `music_volume` | `0.6` | Music volume, 0–1. |
 
 The saver re-reads the file each time it starts. `make install-saver` never
-overwrites your values.
+overwrites your values, and it adds any new settings to an older file.
+
+## Music
+
+The screensaver can loop a soundtrack while it runs. No music ships with the
+project; bring your own. For example, Simon Boswell's *Hackers* suite:
+
+```bash
+cp ~/Downloads/your_track.mp3 ~/Library/Application\ Support/TheGibson/music.mp3
+```
+
+- **When it plays:** the track fades in when the screensaver starts and fades
+  out when it stops. It plays once even with several displays, and it stays
+  silent in System Settings' small preview.
+- **Where the file goes:** the screensaver is sandboxed, so the file has to be
+  in `~/Library/Application Support/TheGibson/` (next to `config.txt`). Any
+  format macOS can play works, such as MP3, AAC/M4A or WAV. To use a different
+  name, set `music = name.m4a`.
+- **No file?** If there's no file, or `music = off`, it stays silent.
 
 ## Sharing it with other Macs
 

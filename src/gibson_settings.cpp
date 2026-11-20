@@ -16,7 +16,12 @@ static const GibsonSettings kDefaults = {
     .bank_strength = 0.45f,
     .bank_max_degrees = 32.f,
     .bank_smoothing = 0.55f,
+    .music_volume = 0.6f,
 };
+/* Music lives next to config.txt: it is the one folder the sandboxed
+ * screensaver may read. Relative names resolve against that folder. */
+static const char *kUserDirRel = "Library/Application Support/TheGibson";
+static const char *kDefaultMusic = "music.mp3";
 static const char *kUserRel = "Library/Application Support/TheGibson/config.txt";
 static const char *kTemplate =
     "# The Gibson\n"
@@ -31,9 +36,17 @@ static const char *kTemplate =
     "bank_strength = 0.45\n"
     "bank_max_degrees = 32\n"
     "# bank_smoothing — seconds of roll lag. Higher is silkier (0.3–0.8).\n"
-    "bank_smoothing = 0.55\n";
+    "bank_smoothing = 0.55\n"
+    "#\n"
+    "# music — file to loop while the screensaver runs, in this folder\n"
+    "# (or an absolute path inside it). `off` for silence.\n"
+    "# music_volume — 0 to 1.\n"
+    "music = music.mp3\n"
+    "music_volume = 0.6\n";
 
 static GibsonSettings g_settings = kDefaults;
+static std::string g_music = kDefaultMusic;
+static std::string g_music_resolved;
 static std::string g_path;
 static bool g_loaded;
 
@@ -99,7 +112,24 @@ static bool parse_file(const std::string &path, GibsonSettings *out)
             continue;
         std::string key = trim(s.substr(0, eq));
         std::string val = trim(s.substr(eq + 1));
-        if (key == "fly_speed" || key == "fly-speed" || key == "speed")
+        if (key == "music")
+        {
+            g_music = val;
+        }
+        else if (key == "music_volume" || key == "music-volume")
+        {
+            char *end = nullptr;
+            float v = std::strtof(val.c_str(), &end);
+            if (end != val.c_str())
+            {
+                if (v < 0.f)
+                    v = 0.f;
+                if (v > 1.f)
+                    v = 1.f;
+                out->music_volume = v;
+            }
+        }
+        else if (key == "fly_speed" || key == "fly-speed" || key == "speed")
         {
             char *end = nullptr;
             float v = std::strtof(val.c_str(), &end);
@@ -224,20 +254,56 @@ static void append_missing_keys(const std::string &path)
     while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
         body.append(buf, n);
     fclose(in);
-    if (body.find("bank_smoothing") != std::string::npos)
+    struct Extra { const char *key; const char *text; };
+    static const Extra extras[] = {
+        {"bank_smoothing",
+         "\n# bank_smoothing — seconds of roll lag. Higher is silkier.\n"
+         "bank_smoothing = 0.55\n"},
+        {"music",
+         "\n# music — file to loop while the screensaver runs, in this folder\n"
+         "# (or an absolute path inside it). `off` for silence.\n"
+         "# music_volume — 0 to 1.\n"
+         "music = music.mp3\n"
+         "music_volume = 0.6\n"},
+    };
+    std::string add;
+    for (const auto &e : extras)
+    {
+        // match the key at the start of a line, so "music" isn't found inside
+        // "music_volume" or a comment
+        const std::string k = e.key;
+        bool found = false;
+        size_t pos = 0;
+        while ((pos = body.find(k, pos)) != std::string::npos)
+        {
+            const bool line_start = pos == 0 || body[pos - 1] == '\n';
+            size_t after = pos + k.size();
+            while (after < body.size() && (body[after] == ' ' || body[after] == '\t'))
+                ++after;
+            if (line_start && after < body.size() && body[after] == '=')
+            {
+                found = true;
+                break;
+            }
+            pos += k.size();
+        }
+        if (!found)
+            add += e.text;
+    }
+    if (add.empty())
         return;
     FILE *out = fopen(path.c_str(), "a");
     if (!out)
         return;
-    fputs("\n# bank_smoothing — seconds of roll lag. Higher is silkier.\n"
-          "bank_smoothing = 0.55\n",
-          out);
+    fputs(add.c_str(), out);
     fclose(out);
 }
 
 void gibson_settings_reload(const char *extra_dir)
 {
     g_settings = kDefaults;
+    g_music = kDefaultMusic;
+    g_music_resolved.clear();
     g_path.clear();
 
     std::vector<std::string> candidates;
@@ -310,4 +376,27 @@ const char *gibson_settings_path(void)
 {
     ensure_loaded();
     return g_path.empty() ? "" : g_path.c_str();
+}
+
+const char *gibson_music_path(void)
+{
+    ensure_loaded();
+    std::string m = g_music;
+    for (auto &c : m)
+        c = (char)std::tolower((unsigned char)c);
+    if (m.empty() || m == "off" || m == "none" || m == "0" || m == "false")
+        return "";
+    if (g_music[0] == '/')
+        g_music_resolved = g_music;
+    else if (g_music[0] == '~' && g_music.size() > 1 && g_music[1] == '/')
+        g_music_resolved = real_home() + g_music.substr(1);
+    else
+        g_music_resolved = real_home() + "/" + kUserDirRel + "/" + g_music;
+    return g_music_resolved.c_str();
+}
+
+float gibson_music_volume(void)
+{
+    ensure_loaded();
+    return g_settings.music_volume;
 }
