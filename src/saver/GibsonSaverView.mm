@@ -54,7 +54,7 @@ static NSString *const kSaverDidStop = @"com.apple.screensaver.didstop";
     [self setAnimationTimeInterval:1.0 / 60.0];
     [self setWantsLayer:YES];
     self.layer.opaque = YES;
-    CGColorRef bg = CGColorCreateGenericRGB(0.0, 10.0 / 255.0, 15.0 / 255.0, 1.0);
+    CGColorRef bg = CGColorCreateGenericRGB(0.0, 0.0, 0.0, 1.0);
     self.layer.backgroundColor = bg;
     CGColorRelease(bg);
 

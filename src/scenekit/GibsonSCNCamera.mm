@@ -109,7 +109,21 @@ static simd_float3 gibson_safe_norm(simd_float3 v, simd_float3 fallback)
     cam.fieldOfView = 72.0;
     cam.zNear = 0.5;
     cam.zFar = 900.0;
-    cam.wantsHDR = NO;
+    /* Movie grade: saturated cyan/violet with heavy glow and streaky motion.
+       HDR lets materials push past 1.0 so only the bright traces, tower caps
+       and pulses cross the bloom threshold. */
+    cam.wantsHDR = YES;
+    cam.wantsExposureAdaptation = NO;
+    cam.exposureOffset = 0.0;
+    cam.minimumExposure = 0.0;
+    cam.maximumExposure = 0.0;
+    cam.bloomThreshold = 0.9;
+    cam.bloomIntensity = 1.3;
+    cam.bloomBlurRadius = 18.0;
+    cam.saturation = 1.35;
+    cam.contrast = 0.12;
+    /* SceneKit motion blur adds heavy sampling grain; left off. */
+    cam.motionBlurIntensity = 0.0;
 
     _cameraNode = [SCNNode node];
     _cameraNode.name = @"gibson-camera";

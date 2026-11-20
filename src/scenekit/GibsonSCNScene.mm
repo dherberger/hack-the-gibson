@@ -81,6 +81,46 @@ static SCNMaterial *gibson_unlit_material(id contents, BOOL alpha)
     return mat;
 }
 
+/* Movie grade (phase 1). Constant-lit materials output diffuse * multiply *
+ * intensity, so these set the hue and how hard each element hits the bloom. */
+static NSColor *gibson_rgb(CGFloat r, CGFloat g, CGFloat b)
+{
+    return [NSColor colorWithCalibratedRed:r green:g blue:b alpha:1.0];
+}
+
+static void gibson_tint(SCNMaterial *mat, NSColor *color, CGFloat intensity)
+{
+    mat.multiply.contents = color;
+    mat.diffuse.intensity = intensity;
+}
+
+/* Towers shift between electric blue and cyan instead of one static tint:
+ *  - viewing angle: faces seen edge-on go cyan, head-on faces lean blue;
+ *  - a slow color wave drifting through the city over time;
+ *  - world position, so neighboring towers aren't in lockstep.
+ * `phase` offsets the wave so dark and light towers differ slightly. */
+static NSString *gibson_tower_hue_shader(float phase)
+{
+    return [NSString stringWithFormat:@
+        "#pragma body\n"
+        "float3 gWorld = (scn_frame.inverseViewTransform * float4(_surface.position, 1.0)).xyz;\n"
+        "float gFacing = abs(dot(normalize(_surface.normal), normalize(_surface.view)));\n"
+        "float gEdgeOn = pow(1.0 - gFacing, 1.5);\n"
+        "float gWave = 0.5 + 0.5 * sin(scn_frame.time * 0.5 + %.3f\n"
+        "                               + gWorld.x * 0.035 + gWorld.z * 0.045);\n"
+        "float gMix = smoothstep(0.15, 0.85, 0.75 * gWave + 0.55 * gEdgeOn);\n"
+        "float3 gBlue = float3(0.10, 0.32, 1.0);\n"
+        "float3 gCyan = float3(0.38, 0.88, 1.0);\n"
+        "float3 gTint = mix(gBlue, gCyan, gMix);\n"
+        /* The brightest texels (text cores, outlines) go pale cyan-white like
+           the movie's electric highlights; dim glass keeps the hue shift. */
+        "float gLum = max(_output.color.r, max(_output.color.g, _output.color.b));\n"
+        "float gHot = smoothstep(0.75, 1.4, gLum);\n"
+        "gTint = mix(gTint, float3(0.70, 0.97, 1.0), gHot * 0.75);\n"
+        "_output.color.rgb *= gTint;\n",
+        phase];
+}
+
 @implementation GibsonSCNScene
 {
     NSURL *_mediaURL;
@@ -125,10 +165,7 @@ static GibsonSCNScene *g_fullWorld;
     view.rendersContinuously = YES;
     view.allowsCameraControl = NO;
     view.autoenablesDefaultLighting = NO;
-    view.backgroundColor = [NSColor colorWithCalibratedRed:0.0
-                                                     green:10.0 / 255.0
-                                                      blue:15.0 / 255.0
-                                                     alpha:1.0];
+    view.backgroundColor = [NSColor blackColor];
     view.antialiasingMode = SCNAntialiasingModeNone;
     view.preferredFramesPerSecond = preview ? 30 : 60;
     view.jitteringEnabled = NO;
@@ -158,19 +195,13 @@ static GibsonSCNScene *g_fullWorld;
     std::srand((unsigned)std::time(nullptr));
 
     _scene = [SCNScene scene];
-    _scene.background.contents = [NSColor colorWithCalibratedRed:0.0
-                                                           green:10.0 / 255.0
-                                                            blue:15.0 / 255.0
-                                                           alpha:1.0];
+    _scene.background.contents = [NSColor blackColor];
     /* City edge is ~900 units out. Fade to the clear color before that so the
        grid never shows a hard wall of towers. */
     _scene.fogStartDistance = 480;
     _scene.fogEndDistance = 820;
     _scene.fogDensityExponent = 2.0;
-    _scene.fogColor = [NSColor colorWithCalibratedRed:0.0
-                                               green:10.0 / 255.0
-                                                blue:15.0 / 255.0
-                                               alpha:1.0];
+    _scene.fogColor = [NSColor blackColor];
     _scene.fogDensityExponent = 1.0;
 
     /* Irrlicht is left-handed; SceneKit is right-handed. Flip Z so authored
@@ -226,6 +257,8 @@ static GibsonSCNScene *g_fullWorld;
         return;
     NSImage *tex = [self imageNamed:@"room.png"];
     SCNMaterial *mat = gibson_unlit_material(tex, NO);
+    /* Pale cyan traces -> glowing blue-violet circuit lines. */
+    gibson_tint(mat, gibson_rgb(0.34, 0.27, 1.0), 1.7);
     geom.materials = @[ mat ];
     SCNNode *room = [SCNNode nodeWithGeometry:geom];
     room.name = @"room";
@@ -251,6 +284,14 @@ static GibsonSCNScene *g_fullWorld;
 
     _darkTowerMat = gibson_unlit_material(dark[0], YES);
     _lightTowerMat = gibson_unlit_material(light[0], YES);
+    /* Grey-teal glass -> saturated electric cyan. */
+    /* Hue comes from the shader modifier; multiply stays white. */
+    gibson_tint(_darkTowerMat, [NSColor whiteColor], 1.45);
+    gibson_tint(_lightTowerMat, [NSColor whiteColor], 1.6);
+    _darkTowerMat.shaderModifiers = @{
+        SCNShaderModifierEntryPointFragment : gibson_tower_hue_shader(0.0f) };
+    _lightTowerMat.shaderModifiers = @{
+        SCNShaderModifierEntryPointFragment : gibson_tower_hue_shader(1.7f) };
     SCNGeometry *darkGeom = [geom copy];
     darkGeom.materials = @[ _darkTowerMat ];
     SCNGeometry *lightGeom = [geom copy];
@@ -299,6 +340,10 @@ static GibsonSCNScene *g_fullWorld;
         return;
     NSImage *tex = [self imageNamed:@"pulse.png"];
     SCNMaterial *mat = gibson_unlit_material(tex, YES);
+    /* Purple blobs -> long cyan-white streaks that bloom. */
+    gibson_tint(mat, gibson_rgb(0.55, 0.95, 1.0), 4.0);
+    mat.blendMode = SCNBlendModeAdd;
+    mat.writesToDepthBuffer = NO;
     geom.materials = @[ mat ];
 
     const int count = _preview ? 80 : 280;
@@ -307,7 +352,7 @@ static GibsonSCNScene *g_fullWorld;
     for (int i = 0; i < count; ++i)
     {
         SCNNode *pulse = [SCNNode nodeWithGeometry:geom];
-        pulse.scale = SCNVector3Make(2.f, 2.f, 4.f);
+        pulse.scale = SCNVector3Make(1.6f, 1.6f, 10.f);
         [self respawnPulse:pulse];
         [_worldRoot addChildNode:pulse];
         _pulses.push_back(pulse);
