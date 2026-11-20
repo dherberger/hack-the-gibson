@@ -94,22 +94,27 @@ To remove it:
 make uninstall-saver
 ```
 
-## Preview without the screensaver
+## The Gibson app
+
+Open `/Applications/TheGibson.app` to change the settings: music on or off,
+the track and its volume, flight speed and banking. Changes are saved right
+away and apply the next time the screensaver starts. **Preview** (⌘P) opens
+the flythrough in a window; Escape closes it.
+
+Opening the app also re-registers the screensaver extension, which helps if
+System Settings loses track of it.
+
+To preview from a build without installing:
 
 ```bash
-make scn
-# or: ./src/scn_preview          (Escape or Q to quit)
-make run-app
-# opens dist/TheGibson.app, a preview window
+make run-app       # opens dist/TheGibson.app
+make scn           # bare preview window: ./src/scn_preview (Escape or Q to quit)
 ```
-
-Opening the installed `/Applications/TheGibson.app` also re-registers the
-screensaver extension, which helps if System Settings loses track of it.
 
 ## Settings
 
-Camera, banking and music settings live in a plain-text file, created on
-first install:
+The app writes to a plain-text file, which you can also edit by hand. It's
+created on first run:
 
 ```
 ~/Library/Application Support/TheGibson/config.txt
@@ -121,7 +126,8 @@ first install:
 | `bank_strength` | `0.45` | How hard the camera leans into turns; `0` keeps it level, and a negative value flips the direction. |
 | `bank_max_degrees` | `32` | The most it will roll, in degrees (0–90). |
 | `bank_smoothing` | `0.55` | Seconds of lag on the roll. Higher is smoother. |
-| `music` | `music.mp3` | Audio file to loop while the screensaver runs (see [Music](#music)). `off` for silence. |
+| `music_enabled` | `no` | `yes` to loop a soundtrack while the screensaver runs (see [Music](#music)). |
+| `music` | `music.mp3` | The audio file to play, in the same folder as `config.txt`. |
 | `music_volume` | `0.6` | Music volume, 0–1. |
 
 The saver re-reads the file each time it starts. `make install-saver` never
@@ -129,11 +135,17 @@ overwrites your values, and it adds any new settings to an older file.
 
 ## Music
 
-The screensaver can loop a soundtrack while it runs. No music ships with the
-project; bring your own. For example, Simon Boswell's *Hackers* suite:
+The screensaver can loop a soundtrack while it runs. It's off by default,
+and no music ships with the project, so bring your own, for example Simon
+Boswell's *Hackers* suite. In The Gibson app, click **Choose…** next to File
+and pick the track. That copies it into place and switches music on; **Play**
+lets you check the volume.
+
+By hand, the same thing is:
 
 ```bash
 cp ~/Downloads/your_track.mp3 ~/Library/Application\ Support/TheGibson/music.mp3
+# then in config.txt: music_enabled = yes
 ```
 
 - **When it plays:** the track fades in when the screensaver starts and fades
@@ -143,7 +155,7 @@ cp ~/Downloads/your_track.mp3 ~/Library/Application\ Support/TheGibson/music.mp3
   in `~/Library/Application Support/TheGibson/` (next to `config.txt`). Any
   format macOS can play works, such as MP3, AAC/M4A or WAV. To use a different
   name, set `music = name.m4a`.
-- **No file?** If there's no file, or `music = off`, it stays silent.
+- **No file?** If music is off or the file is missing, it stays silent.
 
 ## Sharing it with other Macs
 

@@ -17,6 +17,7 @@ static const GibsonSettings kDefaults = {
     .bank_max_degrees = 32.f,
     .bank_smoothing = 0.55f,
     .music_volume = 0.6f,
+    .music_enabled = 0,
 };
 /* Music lives next to config.txt: it is the one folder the sandboxed
  * screensaver may read. Relative names resolve against that folder. */
@@ -38,9 +39,11 @@ static const char *kTemplate =
     "# bank_smoothing — seconds of roll lag. Higher is silkier (0.3–0.8).\n"
     "bank_smoothing = 0.55\n"
     "#\n"
-    "# music — file to loop while the screensaver runs, in this folder\n"
-    "# (or an absolute path inside it). `off` for silence.\n"
+    "# music_enabled — yes to loop a soundtrack while the screensaver runs.\n"
+    "# music — the file to play, kept in this folder (the screensaver is\n"
+    "# sandboxed and can't read anywhere else).\n"
     "# music_volume — 0 to 1.\n"
+    "music_enabled = no\n"
     "music = music.mp3\n"
     "music_volume = 0.6\n";
 
@@ -115,6 +118,13 @@ static bool parse_file(const std::string &path, GibsonSettings *out)
         if (key == "music")
         {
             g_music = val;
+        }
+        else if (key == "music_enabled" || key == "music-enabled")
+        {
+            std::string v = val;
+            for (auto &c : v)
+                c = (char)std::tolower((unsigned char)c);
+            out->music_enabled = (v == "yes" || v == "true" || v == "on" || v == "1") ? 1 : 0;
         }
         else if (key == "music_volume" || key == "music-volume")
         {
@@ -241,6 +251,38 @@ static void seed_user_config(const std::vector<std::string> &templates)
     }
 }
 
+/* Offset of the `key = value` line for key, or npos. Matches the key at the
+ * start of a line followed by `=`, so "music" isn't found inside
+ * "music_volume" or a comment. */
+static size_t find_key_line(const std::string &body, const std::string &k)
+{
+    size_t pos = 0;
+    while ((pos = body.find(k, pos)) != std::string::npos)
+    {
+        const bool line_start = pos == 0 || body[pos - 1] == '\n';
+        size_t after = pos + k.size();
+        while (after < body.size() && (body[after] == ' ' || body[after] == '\t'))
+            ++after;
+        if (line_start && after < body.size() && body[after] == '=')
+            return pos;
+        pos += k.size();
+    }
+    return std::string::npos;
+}
+
+static bool read_file(const std::string &path, std::string *body)
+{
+    FILE *in = fopen(path.c_str(), "r");
+    if (!in)
+        return false;
+    char buf[1024];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
+        body->append(buf, n);
+    fclose(in);
+    return true;
+}
+
 static void append_missing_keys(const std::string &path)
 {
     if (!file_exists(path))
@@ -259,39 +301,29 @@ static void append_missing_keys(const std::string &path)
         {"bank_smoothing",
          "\n# bank_smoothing — seconds of roll lag. Higher is silkier.\n"
          "bank_smoothing = 0.55\n"},
+        {"bank_max_degrees",
+         "bank_max_degrees = 32\n"},
+        {"music_enabled",
+         "\n# music_enabled — yes to loop a soundtrack while the screensaver runs.\n"
+         "music_enabled = no\n"},
         {"music",
-         "\n# music — file to loop while the screensaver runs, in this folder\n"
-         "# (or an absolute path inside it). `off` for silence.\n"
+         "# music — the file to play, kept in this folder (the screensaver is\n"
+         "# sandboxed and can't read anywhere else).\n"
+         "music = music.mp3\n"},
+        {"music_volume",
          "# music_volume — 0 to 1.\n"
-         "music = music.mp3\n"
          "music_volume = 0.6\n"},
     };
     std::string add;
     for (const auto &e : extras)
     {
-        // match the key at the start of a line, so "music" isn't found inside
-        // "music_volume" or a comment
-        const std::string k = e.key;
-        bool found = false;
-        size_t pos = 0;
-        while ((pos = body.find(k, pos)) != std::string::npos)
-        {
-            const bool line_start = pos == 0 || body[pos - 1] == '\n';
-            size_t after = pos + k.size();
-            while (after < body.size() && (body[after] == ' ' || body[after] == '\t'))
-                ++after;
-            if (line_start && after < body.size() && body[after] == '=')
-            {
-                found = true;
-                break;
-            }
-            pos += k.size();
-        }
-        if (!found)
+        if (find_key_line(body, e.key) == std::string::npos)
             add += e.text;
     }
     if (add.empty())
         return;
+    if (!body.empty() && body.back() != '\n')
+        add.insert(0, "\n");
     FILE *out = fopen(path.c_str(), "a");
     if (!out)
         return;
@@ -381,6 +413,8 @@ const char *gibson_settings_path(void)
 const char *gibson_music_path(void)
 {
     ensure_loaded();
+    if (!g_settings.music_enabled)
+        return "";
     std::string m = g_music;
     for (auto &c : m)
         c = (char)std::tolower((unsigned char)c);
@@ -399,4 +433,64 @@ float gibson_music_volume(void)
 {
     ensure_loaded();
     return g_settings.music_volume;
+}
+
+int gibson_music_enabled(void)
+{
+    ensure_loaded();
+    return g_settings.music_enabled;
+}
+
+const char *gibson_music_setting(void)
+{
+    ensure_loaded();
+    return g_music.c_str();
+}
+
+const char *gibson_user_dir(void)
+{
+    static std::string dir;
+    dir = real_home() + "/" + kUserDirRel;
+    return dir.c_str();
+}
+
+int gibson_settings_set(const char *key, const char *value)
+{
+    if (!key || !key[0] || !value)
+        return 0;
+    const std::string path = real_home() + "/" + kUserRel;
+    if (!file_exists(path))
+        gibson_settings_reload(nullptr);   // seeds the file
+    std::string body;
+    if (!read_file(path, &body))
+        return 0;
+    const std::string line = std::string(key) + " = " + value;
+    const size_t pos = find_key_line(body, key);
+    if (pos != std::string::npos)
+    {
+        size_t end = body.find('\n', pos);
+        if (end == std::string::npos)
+            end = body.size();
+        else if (end > pos && body[end - 1] == '\r')
+            --end;   // keep a CRLF file CRLF
+        body.replace(pos, end - pos, line);
+    }
+    else
+    {
+        if (!body.empty() && body.back() != '\n')
+            body += "\n";
+        body += line + "\n";
+    }
+    const std::string tmp = path + ".tmp";
+    FILE *out = fopen(tmp.c_str(), "w");
+    if (!out)
+        return 0;
+    const bool ok = fwrite(body.data(), 1, body.size(), out) == body.size();
+    fclose(out);
+    if (!ok || rename(tmp.c_str(), path.c_str()) != 0)
+    {
+        unlink(tmp.c_str());
+        return 0;
+    }
+    return 1;
 }

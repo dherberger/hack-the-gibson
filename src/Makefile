@@ -4,7 +4,7 @@
 # 'make install-saver'  install to /Applications, register, restart WallpaperAgent
 # 'make enable-saver'   also set it as the idle / hot-corner screensaver
 # 'make scn'            build and launch the SceneKit preview window
-# 'make run-app'        open dist/TheGibson.app
+# 'make run-app'        open dist/TheGibson.app (settings window + preview)
 # 'make legacy-saver'   build the classic .saver plug-in (macOS 11+)
 # 'make clean'          remove objects, executables, and dist bundles
 
@@ -40,6 +40,7 @@ SAVER_SCN_LIBS = \
 APPEX_LIBS = $(SAVER_SCN_LIBS) -framework ExtensionFoundation
 PREVIEW_LIBS = \
 	$(foreach n,$(SCN_FRAMEWORKS),-framework $n)
+HOST_LIBS = $(PREVIEW_LIBS) -framework AVFoundation -framework UniformTypeIdentifiers
 
 ROOT := $(abspath ..)
 DIST := $(ROOT)/dist
@@ -122,7 +123,7 @@ $(APP_BIN): $(APPEX_BIN) $(SCN_OBJS) $(HOST_OBJ) app/Info.plist
 	cp app/Info.plist "$(APP_DIR)/Contents/Info.plist"
 	printf 'APPL????' > "$(APP_DIR)/Contents/PkgInfo"
 	$(CXX) $(CXXFLAGS) -fobjc-arc -mmacosx-version-min=$(SAVER_MIN_OS) \
-		-o "$(APP_BIN)" $(SCN_OBJS) $(HOST_OBJ) $(PREVIEW_LIBS)
+		-o "$(APP_BIN)" $(SCN_OBJS) $(HOST_OBJ) $(HOST_LIBS)
 	codesign --force --sign "$(CODESIGN_IDENTITY)" $(CODESIGN_OPTS) "$(APP_DIR)"
 	@echo "Built $(APP_DIR) (signed with $(CODESIGN_IDENTITY))"
 	@echo "Install with: make install-saver"

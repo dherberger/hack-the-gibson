@@ -11,6 +11,7 @@ typedef struct GibsonSettings {
     float bank_max_degrees;
     float bank_smoothing;
     float music_volume;
+    int music_enabled;
 } GibsonSettings;
 
 /* extra_dir is searched for config.txt (saver Resources, project root, …). */
@@ -22,9 +23,19 @@ float gibson_bank_max_degrees(void);
 float gibson_bank_smoothing(void);
 const char *gibson_settings_path(void);
 /* Music played on a loop while the screensaver runs: an absolute path, or ""
- * when disabled (`music = off`). The file may be missing; callers check. */
+ * when disabled (`music_enabled = no` or `music = off`). The file may be
+ * missing; callers check. */
 const char *gibson_music_path(void);
 float gibson_music_volume(void);
+int gibson_music_enabled(void);
+/* The `music` value as written in config.txt (usually a bare file name). */
+const char *gibson_music_setting(void);
+/* ~/Library/Application Support/TheGibson: config.txt and the music file. */
+const char *gibson_user_dir(void);
+/* Writes `key = value` into the user's config.txt, replacing the key's line
+ * or appending it, and keeping comments. Returns 1 on success. Call
+ * gibson_settings_reload() afterwards to read it back. */
+int gibson_settings_set(const char *key, const char *value);
 
 #ifdef __cplusplus
 }

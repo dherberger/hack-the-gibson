@@ -8,6 +8,15 @@ fly_speed = 0.55
 # bank_strength — how hard the camera leans into turns (0 = level, 0.45 ≈ movie).
 # bank_max_degrees — clamp on roll. Negative bank_strength flips left/right.
 bank_strength = 0.45
+bank_max_degrees = 32
 # bank_smoothing — seconds of roll lag. Higher is silkier (0.3–0.8).
 bank_smoothing = 0.55
 
+#
+# music_enabled — yes to loop a soundtrack while the screensaver runs.
+# music — the file to play, kept in this folder (the screensaver is
+# sandboxed and can't read anywhere else).
+# music_volume — 0 to 1.
+music_enabled = no
+music = music.mp3
+music_volume = 0.6
