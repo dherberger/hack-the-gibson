@@ -122,8 +122,8 @@ static simd_float3 gibson_safe_norm(simd_float3 v, simd_float3 fallback)
     cam.bloomBlurRadius = 18.0;
     cam.saturation = 1.35;
     cam.contrast = 0.12;
-    /* SceneKit motion blur adds heavy sampling grain; left off. */
-    cam.motionBlurIntensity = 0.0;
+    /* Grainy in offscreen snapshots; trying it live. 0 turns it off. */
+    cam.motionBlurIntensity = 0.4;
 
     _cameraNode = [SCNNode node];
     _cameraNode.name = @"gibson-camera";
