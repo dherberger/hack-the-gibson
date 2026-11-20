@@ -13,13 +13,10 @@ traces catch the towers' light, and a low, banking camera.
 # Screenshots
 
 ![overhead](media/screenshot1.png)
-*omg, such cool*
 
 ![low_shot](media/screenshot2.png)
-*wow, real hackz*
 
 ![banking](media/screenshot3.png)
-*hack the planet*
 
 # How it got here
 
