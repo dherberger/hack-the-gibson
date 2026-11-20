@@ -67,14 +67,6 @@ static SCNGeometry *gibson_geometry_from_obj(NSURL *url)
     return nil;
 }
 
-static void gibson_bind_material(SCNNode *node, SCNMaterial *mat)
-{
-    if (node.geometry)
-        node.geometry.materials = @[ mat ];
-    for (SCNNode *child in node.childNodes)
-        gibson_bind_material(child, mat);
-}
-
 static SCNMaterial *gibson_unlit_material(id contents, BOOL alpha)
 {
     SCNMaterial *mat = [SCNMaterial material];
@@ -141,10 +133,14 @@ static NSString *gibson_tower_hue_shader(float phase)
     NSURL *_mediaURL;
     GibsonSCNCamera *_flyCam;
     SCNNode *_worldRoot;
-    SCNMaterial *_darkTowerMat;
-    SCNMaterial *_lightTowerMat;
-    NSArray<NSImage *> *_darkFrames;
-    NSArray<NSImage *> *_lightFrames;
+    /* Every tower node of a type shares one geometry. The text animation
+       swaps that geometry's material between one prebuilt material per frame:
+       assigning a new image to a live material instead makes SceneKit
+       re-process the bitmap on every swap. */
+    SCNGeometry *_darkTowers;
+    SCNGeometry *_lightTowers;
+    NSArray<SCNMaterial *> *_darkTowerMats;
+    NSArray<SCNMaterial *> *_lightTowerMats;
     NSInteger _towerFrame;
     NSTimeInterval _lastTowerSwap;
     NSTimeInterval _startTime;
@@ -276,7 +272,8 @@ static GibsonSCNScene *g_fullWorld;
  *  - the floor's dark gaps are opaque, and its traces are partly see-through
  *    (thresholded trace texture as an RGBZero transparency mask), so the
  *    mirrored towers show only inside the traces.
- * Drawing the towers twice costs ~30% more CPU, like a reflection pass. */
+ * Drawing the towers twice roughly doubles their draw calls, like a
+ * reflection pass. */
 #define GIBSON_ORDER_MIRROR (-10)
 #define GIBSON_ORDER_FLOOR (-5)
 
@@ -348,36 +345,40 @@ static NSImage *gibson_trace_mask_image(NSImage *src)
     [_scene.rootNode addChildNode:room];
 }
 
+- (SCNMaterial *)towerMaterialNamed:(NSString *)name intensity:(CGFloat)intensity phase:(float)phase
+{
+    SCNMaterial *mat = gibson_unlit_material([self imageNamed:name], YES);
+    /* Grey-teal glass -> saturated electric cyan. Hue comes from the shader
+       modifier; multiply stays white. */
+    gibson_tint(mat, [NSColor whiteColor], intensity);
+    mat.shaderModifiers = @{ SCNShaderModifierEntryPointFragment : gibson_tower_hue_shader(phase) };
+    return mat;
+}
+
 - (void)addTowers
 {
-    NSMutableArray<NSImage *> *dark = [NSMutableArray arrayWithCapacity:TOWER_TEXTURE_COUNT];
-    NSMutableArray<NSImage *> *light = [NSMutableArray arrayWithCapacity:TOWER_TEXTURE_COUNT];
-    for (int i = 1; i <= TOWER_TEXTURE_COUNT; ++i)
-    {
-        [dark addObject:[self imageNamed:[NSString stringWithFormat:@"towers1-%d.png", i]]];
-        [light addObject:[self imageNamed:[NSString stringWithFormat:@"towers2-%d.png", i]]];
-    }
-    _darkFrames = dark;
-    _lightFrames = light;
-
     SCNGeometry *geom = gibson_geometry_from_obj([self mediaItem:@"towers.obj"]);
     if (!geom)
         return;
 
-    _darkTowerMat = gibson_unlit_material(dark[0], YES);
-    _lightTowerMat = gibson_unlit_material(light[0], YES);
-    /* Grey-teal glass -> saturated electric cyan. */
-    /* Hue comes from the shader modifier; multiply stays white. */
-    gibson_tint(_darkTowerMat, [NSColor whiteColor], 1.45);
-    gibson_tint(_lightTowerMat, [NSColor whiteColor], 1.6);
-    _darkTowerMat.shaderModifiers = @{
-        SCNShaderModifierEntryPointFragment : gibson_tower_hue_shader(0.0f) };
-    _lightTowerMat.shaderModifiers = @{
-        SCNShaderModifierEntryPointFragment : gibson_tower_hue_shader(1.7f) };
+    NSMutableArray<SCNMaterial *> *dark = [NSMutableArray arrayWithCapacity:TOWER_TEXTURE_COUNT];
+    NSMutableArray<SCNMaterial *> *light = [NSMutableArray arrayWithCapacity:TOWER_TEXTURE_COUNT];
+    for (int i = 1; i <= TOWER_TEXTURE_COUNT; ++i)
+    {
+        [dark addObject:[self towerMaterialNamed:[NSString stringWithFormat:@"towers1-%d.png", i]
+                                       intensity:1.45 phase:0.0f]];
+        [light addObject:[self towerMaterialNamed:[NSString stringWithFormat:@"towers2-%d.png", i]
+                                        intensity:1.6 phase:1.7f]];
+    }
+    _darkTowerMats = dark;
+    _lightTowerMats = light;
+
     SCNGeometry *darkGeom = [geom copy];
-    darkGeom.materials = @[ _darkTowerMat ];
+    darkGeom.materials = @[ dark[0] ];
     SCNGeometry *lightGeom = [geom copy];
-    lightGeom.materials = @[ _lightTowerMat ];
+    lightGeom.materials = @[ light[0] ];
+    _darkTowers = darkGeom;
+    _lightTowers = lightGeom;
 
     SCNNode *darkGroup = [SCNNode node];
     SCNNode *lightGroup = [SCNNode node];
@@ -408,12 +409,14 @@ static NSImage *gibson_trace_mask_image(NSImage *src)
               x + TOWER_DIST / 2.f, z);
     }
 
-    SCNNode *darkFlat = [darkGroup flattenedClone];
-    SCNNode *lightFlat = [lightGroup flattenedClone];
-    gibson_bind_material(darkFlat, _darkTowerMat);
-    gibson_bind_material(lightFlat, _lightTowerMat);
-    [_worldRoot addChildNode:darkFlat];
-    [_worldRoot addChildNode:lightFlat];
+    /* One node per tower, not -flattenedClone. The glass only looks right
+       drawn back to front, tower by tower, and SceneKit sorts a flattened
+       clone that way too, but it draws all 3600 towers every frame. Separate
+       nodes get the same sort plus frustum culling, at about half the CPU.
+       (A single merged mesh is far cheaper still, but draws in a fixed order,
+       so near glass hides the towers behind it.) */
+    [_worldRoot addChildNode:darkGroup];
+    [_worldRoot addChildNode:lightGroup];
 
     /* Fake reflection: the same towers flipped under the floor, showing only
        through the floor's see-through traces (see addRoom). Shares geometry
@@ -421,17 +424,17 @@ static NSImage *gibson_trace_mask_image(NSImage *src)
     SCNNode *mirror = [SCNNode node];
     mirror.name = @"tower-mirror";
     mirror.scale = SCNVector3Make(1, -1, 1);
-    for (SCNNode *flat in @[ darkFlat, lightFlat ])
+    for (SCNNode *group in @[ darkGroup, lightGroup ])
     {
-        SCNNode *copy = [SCNNode nodeWithGeometry:flat.geometry];
+        SCNNode *copy = [group clone];
         /* Fixed draw order: mirror, then the floor over it, then the real
            towers. Left to SceneKit's distance sort, the mirror sometimes
            lands on top of the floor when the camera turns. */
-        copy.renderingOrder = GIBSON_ORDER_MIRROR;
+        for (SCNNode *tower in copy.childNodes)
+            tower.renderingOrder = GIBSON_ORDER_MIRROR;
         [mirror addChildNode:copy];
     }
     [_worldRoot addChildNode:mirror];
-
 }
 
 - (void)addPulses
@@ -512,18 +515,8 @@ static NSImage *gibson_trace_mask_image(NSImage *src)
         return;
     _lastTowerSwap = time;
     _towerFrame = (_towerFrame + 1) % TOWER_TEXTURE_COUNT;
-    if (_darkFrames.count)
-    {
-        id frame = _darkFrames[_towerFrame];
-        _darkTowerMat.diffuse.contents = frame;
-        _darkTowerMat.transparent.contents = frame;
-    }
-    if (_lightFrames.count)
-    {
-        id frame = _lightFrames[_towerFrame];
-        _lightTowerMat.diffuse.contents = frame;
-        _lightTowerMat.transparent.contents = frame;
-    }
+    _darkTowers.materials = @[ _darkTowerMats[_towerFrame] ];
+    _lightTowers.materials = @[ _lightTowerMats[_towerFrame] ];
 }
 
 - (void)updatePulses:(float)delta
