@@ -3,27 +3,12 @@
 # Credit Where Credit Is Due
 This is a fork of a repo archived by someone that cared enough to keep it alive - I have merely AI slop coded my way to making it work for my purposes; please credit the original maintainers of this work, paulkiernan and John Serafino. They are truly elite.
 
-
-
-
 > "Mess with the best, die like the rest." - Dade Murphey a.k.a. Crash
 > Override a.k.a. Zero Cool
 
-It's hard to believe [it's been over 20 years](http://passcode.csmonitor.com/hackers)
-since we were all flown through the Gibson for the first time. Worse
-than that though is the lack of how this totally righteous and authentic
-hacking UI never caught on to the mainstream. This project aims to
-revive the dashboard of the most 1337 H4X0Rs and serve as a reminder to
-your friends that their garbage files aren't safe, even when your Gibson
-is sleeping.
-
-A little googling revealed a previous attempt at a screensaver by
-[John Serafino](https://sites.google.com/site/lazerbladegames/the-gibson)
-for Windows. Here I pare his implementation down to work on osx (and
-eventually other platforms) and open it up to the hacker community to
-extend to their heart's desire.
-
-Pull requests welcome!
+A macOS screensaver that flies you through the Gibson from *Hackers* (1995):
+canyons of glass towers covered in glowing data, a circuit-board floor whose
+traces catch the towers' light, and a low, banking camera.
 
 # Screenshots
 
@@ -36,85 +21,184 @@ Pull requests welcome!
 ![banking](media/screenshot3.png)
 *hack the planet*
 
+# How it got here
 
-# Installation
+1. **John Serafino** built the original Gibson screensaver for Windows on the
+   [Irrlicht](https://irrlicht.sourceforge.io) engine
+   ([lazerbladegames](https://sites.google.com/site/lazerbladegames/the-gibson)).
+2. **Paul Kiernan** ([paulkiernan/hack-the-gibson](https://github.com/paulkiernan/hack-the-gibson))
+   pared it down into a windowed OS X app and opened it up to the community.
+3. **This fork** rebuilt it as a native macOS screensaver in SceneKit/Metal and
+   reworked the look against frames from the film:
+   - **Towers:** dark see-through glass covered in bold glowing text that
+     flickers, shifting between electric blue and pale cyan with viewing angle
+     and over time, with glowing edges and rims. Packed into tight rows like
+     the film's canyons, and 15% taller than the original.
+   - **Floor:** a generated circuit board (right-angle routing, round vias,
+     two trace weights). The floor stays dark; only the traces reflect the
+     towers above them.
+   - **Camera:** flies low (about a sixth of tower height), banks into turns,
+     and swoops over the rooftops once a loop.
+   - **Grade:** bloom, saturation, motion blur and cyan pulses streaking
+     through the city.
+   - **Format:** ships the way Apple's own screensavers do, as an app
+     extension (`.appex`) inside `TheGibson.app`, so it runs in its own process
+     instead of inside `legacyScreenSaver`.
+   - **Performance:** about 35–40% of one CPU core at 60 fps on Apple Silicon.
+   - **Code:** the original Irrlicht app is gone from this fork; everything
+     is SceneKit/Metal (Objective-C++). The earlier code is still in the git
+     history.
 
-Requires macOS with [Homebrew](https://brew.sh) and a C++17 compiler (Xcode Command Line Tools).
+# Requirements
+
+- macOS 14 (Sonoma) or later on **Apple Silicon**. The build is arm64 only.
+- Xcode Command Line Tools: `xcode-select --install`.
+- Nothing else: no Homebrew, no third-party engine.
+- Optional: Python 3, only to regenerate the textures (see
+  [Regenerating the textures](#regenerating-the-textures)).
+
+# Install the screensaver
 
 ```bash
-# Install the Irrlicht 3d engine via Homebrew
-brew install irrlicht
-
-# Build from the project root
-make
-
-# Run (windowed). Press Escape or Q to quit.
-make run
-# or: ./src/gibson
-
-# Full-display flythrough (borderless window; Escape or Q to quit)
-./src/gibson --fullscreen
-```
-
-The Makefile locates Irrlicht through Homebrew (`/opt/homebrew` on Apple Silicon, `/usr/local` on Intel) instead of a hardcoded Cellar version.
-
-## Screensaver
-
-Build a macOS Screen Saver **app extension** (`.appex`) hosted by `TheGibson.app`. This is the same format Apple’s built-in savers use, so it runs as its own process instead of inside `legacyScreenSaver`. Requires macOS 14+. SceneKit/Metal; no Homebrew at runtime.
-
-```bash
-make saver
+git clone https://github.com/dherberger/hack-the-gibson.git
+cd hack-the-gibson
 make install-saver
 ```
 
-That copies `dist/TheGibson.app` to `/Applications/TheGibson.app` and registers the extension with `pluginkit`. Fully quit System Settings, reopen it, and choose **The Gibson** (it sits with the first-party savers, not under Other).
+(Plain `make` only builds `dist/TheGibson.app`, without installing it.)
 
-The host app is a SceneKit preview window. Opening the copy in `/Applications` also re-registers the extension. Camera speed still lives in `~/Library/Application Support/TheGibson/config.txt`.
+`make install-saver` does the following:
+- builds `dist/TheGibson.app` with the screensaver extension inside;
+- copies it to `/Applications/TheGibson.app`;
+- signs it with the best identity in your keychain (Developer ID, then Apple
+  Development, then ad hoc);
+- registers the extension with `pluginkit`;
+- restarts `WallpaperAgent` so the new build is the one that runs;
+- removes any old `Gibson.saver` from `~/Library/Screen Savers`.
 
-To set it as the idle / hot-corner saver as well:
+Then open **System Settings → Screen Saver** and choose **The Gibson**. It
+sits with Apple's screensavers, not under "Other". If it doesn't show up, quit
+System Settings completely and reopen it.
+
+To set it as the screensaver directly (idle and hot corners), without going
+through System Settings:
 
 ```bash
 make enable-saver
 ```
 
-Signing uses a **Developer ID Application** identity if one is in your keychain, then Apple Development, then ad-hoc. Other Macs you own need a certificate:
+This writes the choice into macOS's wallpaper settings. It backs up the
+original file first, as `Index.plist.gibson-bak` next to it in
+`~/Library/Application Support/com.apple.wallpaper/Store/`.
 
-1. [developer.apple.com](https://developer.apple.com/account/resources/certificates) → **Developer ID Application**
-2. Download and double-click to add it to Keychain
-3. Rebuild: `make install-saver`
-4. To Gatekeeper-pass a copy: `xcrun notarytool store-credentials AC_PASSWORD --apple-id you@email.com --team-id TEAMID` then `make notarize NOTARY_PROFILE=AC_PASSWORD`
+To remove it:
 
-The old `.saver` plug-in is still available as `make legacy-saver` (installs under Other via `legacyScreenSaver`). `make install-saver` removes it so only the modern extension is registered.
+```bash
+make uninstall-saver
+```
 
-To iterate on the SceneKit scene without opening System Settings:
+## Preview without the screensaver
 
 ```bash
 make scn
-# or: ./src/scn_preview --preview
+# or: ./src/scn_preview          (Escape or Q to quit)
+make run-app
+# opens dist/TheGibson.app, a preview window
 ```
 
-Press Escape or Q to quit. The original Irrlicht windowed app is unchanged (`make` / `make run`).
+Opening the installed `/Applications/TheGibson.app` also re-registers the
+screensaver extension, which helps if System Settings loses track of it.
 
-Camera speed and banking live in a text config:
+## Settings
+
+Camera speed and banking live in a plain-text file, created on first install:
 
 ```
 ~/Library/Application Support/TheGibson/config.txt
 ```
 
-`fly_speed` default is `0.55` (original demo was `0.9`). `bank_strength` defaults to `0.45`; `0` keeps the camera level. `bank_smoothing` (seconds) damps the roll. Edit and trigger the saver again. `make install-saver` does not overwrite existing values.
+| Key | Default | What it does |
+|---|---|---|
+| `fly_speed` | `0.55` | Speed along the flight path. The original demo was `0.9`. |
+| `bank_strength` | `0.45` | How hard the camera leans into turns; `0` keeps it level, and a negative value flips the direction. |
+| `bank_max_degrees` | `32` | The most it will roll, in degrees (0–90). |
+| `bank_smoothing` | `0.55` | Seconds of lag on the roll. Higher is smoother. |
 
-Remove the screensaver with `make uninstall-saver`.
+The saver re-reads the file each time it starts. `make install-saver` never
+overwrites your values.
 
-# Known Issues
+## Sharing it with other Macs
 
-1. The windowed app still uses Irrlicht's deprecated OpenGL path. The screensaver is SceneKit/Metal. If the System Settings preview is stale, fully quit System Settings and reopen it so it reloads the extension. After a rebuild, `make install-saver` again so `/Applications/TheGibson.app` is the only copy `pluginkit` knows about.
+On another Mac you own, you can simply clone the repo and run
+`make install-saver` there. To hand someone a pre-built copy that Gatekeeper
+accepts, you need a **Developer ID Application** certificate and notarization:
 
+1. Create the certificate at [developer.apple.com](https://developer.apple.com/account/resources/certificates)
+   (Certificates → **Developer ID Application**), download it, and double-click
+   it to add it to Keychain.
+2. Store notary credentials once:
+   `xcrun notarytool store-credentials AC_PASSWORD --apple-id you@email.com --team-id TEAMID`
+3. Run `make notarize NOTARY_PROFILE=AC_PASSWORD`. This builds, signs,
+   notarizes and staples `dist/TheGibson.app`, and leaves a zip at
+   `dist/TheGibson.zip`.
+
+# Regenerating the textures
+
+The tower text and the circuit-board floor in `media/` are generated by
+`tools/gen_textures.py`, so you can change the look without hand-editing
+images.
+
+```bash
+python3 -m venv tools/.venv
+tools/.venv/bin/pip install pillow numpy
+tools/.venv/bin/python tools/gen_textures.py                 # towers + floor
+tools/.venv/bin/python tools/gen_textures.py --floor-only    # just the floor
+make install-saver                                           # picks up the new media
+```
+
+- `--seed N` gives a different layout. The default is `1995`.
+- `--floor pcb` (the default) is the circuit-board floor. Its density is
+  `PCB_COVERAGE` in the script.
+- `--floor movie` is a board laid out from proportions measured on the film's
+  floor.
+- `--floor legacy` brings back the original floor art. It is drawn at a
+  different scale, so set `FLOOR_REPEAT` in `src/scenekit/GibsonSCNScene.mm`
+  to `2` to match.
+- The tower look (glass opacity, tint, text size) is set by constants near the
+  top of the script, such as `BODY_TINT`.
+
+To render frames offscreen, for comparing or making screenshots:
+
+```bash
+./src/scn_preview --sequence out/ --count 18 --interval 0.5 --size 1600 1000
+```
+
+`tools/trace_analysis.py` is the script that measured the film's floor
+traces. It needs `opencv-python-headless` in the same venv, plus movie stills,
+which are not included in the repo.
+
+# Classic `.saver` plug-in
+
+The first native version of this screensaver, a classic `.saver` plug-in
+that runs inside `legacyScreenSaver` (macOS 11+), can still be built with
+`make legacy-saver`. It shows up under "Other" in System Settings.
+`make install-saver` removes it so only the app extension is registered.
+
+# Known issues
+
+1. **Black screen after a reinstall:** this happens if `WallpaperAgent` is
+   still holding the previous build. `make install-saver` restarts it; if you
+   copy the app by hand, run `killall WallpaperAgent` afterwards.
+2. **Stale preview in System Settings:** quit System Settings completely and
+   reopen it.
+3. **Intel Macs are not supported** (the build is arm64 only).
 
 # Credit
 
 All credit goes to the leet [John Serafino](https://sites.google.com/site/lazerbladegames/the-gibson)
-for the work on the original Windows version of this screensaver. 
-
+for the original Windows version of this screensaver, and to
+[Paul Kiernan](https://github.com/paulkiernan/hack-the-gibson) for bringing it
+to the Mac.
 
 # License
 

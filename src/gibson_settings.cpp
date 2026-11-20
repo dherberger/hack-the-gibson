@@ -138,6 +138,19 @@ static bool parse_file(const std::string &path, GibsonSettings *out)
                 out->bank_smoothing = v;
             }
         }
+        else if (key == "bank_max_degrees" || key == "bank-max-degrees")
+        {
+            char *end = nullptr;
+            float v = std::strtof(val.c_str(), &end);
+            if (end != val.c_str())
+            {
+                if (v < 0.f)
+                    v = 0.f;
+                if (v > 90.f)
+                    v = 90.f;
+                out->bank_max_degrees = v;
+            }
+        }
     }
     fclose(fp);
     return true;

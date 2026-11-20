@@ -1,11 +1,11 @@
-# The Gibson - Makefile
+# The Gibson - Makefile (SceneKit/Metal screensaver)
 #
-# 'make'                build executable file 'gibson'
-# 'make run'            build and launch the windowed Irrlicht app
-# 'make scn'            build and launch the SceneKit preview window
-# 'make saver'          build dist/TheGibson.app (host + screensaver appex)
-# 'make install-saver'  install to /Applications and register with pluginkit
+# 'make'                build dist/TheGibson.app (host app + screensaver appex)
+# 'make install-saver'  install to /Applications, register, restart WallpaperAgent
 # 'make enable-saver'   also set it as the idle / hot-corner screensaver
+# 'make scn'            build and launch the SceneKit preview window
+# 'make run-app'        open dist/TheGibson.app
+# 'make legacy-saver'   build the classic .saver plug-in (macOS 11+)
 # 'make clean'          remove objects, executables, and dist bundles
 
 CXX ?= c++
@@ -15,93 +15,21 @@ LEGACY_SAVER_MIN_OS ?= 11.0
 # Objects linked into both the appex (14.0) and the legacy saver (11.0).
 SHARED_MIN_OS ?= $(LEGACY_SAVER_MIN_OS)
 
-# Prefer the local Homebrew prefix (Apple Silicon: /opt/homebrew, Intel: /usr/local)
-# so we do not depend on a working `brew` API at build time.
-ifneq ($(wildcard /opt/homebrew/opt/irrlicht),)
-  BREW_PREFIX := /opt/homebrew
-else ifneq ($(wildcard /usr/local/opt/irrlicht),)
-  BREW_PREFIX := /usr/local
-else
-  BREW_PREFIX := $(shell brew --prefix 2>/dev/null)
-endif
-
-IRRLICHT_PREFIX ?= $(BREW_PREFIX)/opt/irrlicht
-
-ifeq ($(wildcard $(IRRLICHT_PREFIX)/include/irrlicht/irrlicht.h),)
-  $(error Irrlicht not found at $(IRRLICHT_PREFIX). Install with: brew install irrlicht)
-endif
-
-INCLUDE_DIRS = . include saver $(IRRLICHT_PREFIX)/include/irrlicht
-INCLUDES = $(foreach d,$(INCLUDE_DIRS),-I$d)
-
-LIB_DIRS = $(IRRLICHT_PREFIX)/lib $(BREW_PREFIX)/lib
-LIB_NAMES = Irrlicht png jpeg z bz2 objc
-FRAMEWORK_NAMES = OpenGL Cocoa IOKit Carbon Foundation AppKit CoreFoundation CoreGraphics
-
-LIBS = \
-	$(foreach d,$(LIB_DIRS),-L$d) \
-	$(foreach n,$(LIB_NAMES),-l$n) \
-	$(foreach n,$(FRAMEWORK_NAMES),-framework $n) \
-	$(foreach d,$(LIB_DIRS),-Wl,-rpath,$(d))
-
-PNG_A := $(wildcard $(BREW_PREFIX)/opt/libpng/lib/libpng.a)
-JPEG_A := $(wildcard $(BREW_PREFIX)/opt/jpeg-turbo/lib/libjpeg.a)
-ifeq ($(JPEG_A),)
-  JPEG_A := $(wildcard $(BREW_PREFIX)/opt/jpeg/lib/libjpeg.a)
-endif
-IRRLICHT_A := $(IRRLICHT_PREFIX)/lib/libIrrlicht.a
-
-SAVER_FRAMEWORKS = OpenGL Cocoa IOKit Carbon Foundation AppKit CoreFoundation CoreGraphics QuartzCore ScreenSaver
-SAVER_LIBS = \
-	-Wl,-ObjC \
-	$(IRRLICHT_A) $(PNG_A) $(JPEG_A) \
-	-lz -lbz2 -lobjc \
-	$(foreach n,$(SAVER_FRAMEWORKS),-framework $n)
-
-SCENE_SRCS = \
-	PathCreator.cpp \
-	cam.cpp \
-	gibson_scene.cpp \
-	pulse.cpp \
-	room.cpp \
-	gibson_settings.cpp \
-	include/Effects/CEffectPostProc.cpp \
-	include/Effects/CLensFlarePostProc.cpp \
-	include/Effects/CRendererPostProc.cpp \
-	include/Effects/CSplitPostProc.cpp \
-	include/Effects/CTransitionPostProc.cpp \
-	include/Effects/CWaterPostProc.cpp \
-	include/Effects/IPostProc.cpp \
-	include/HardwareSkinCallback.cpp \
-	include/camera.cpp \
-	include/events.cpp \
-	include/globals.cpp \
-	include/gui.cpp \
-	include/lighting.cpp \
-	include/mesh.cpp \
-	include/ray3d.cpp \
-	include/render.cpp
-
-MM_SRCS = macos_retina.mm
 SAVER_MM = saver/GibsonSaverView.mm
 APPEX_MM = \
 	saver/GibsonScreenSaverExtension.mm \
 	saver/GibsonScreenSaverViewController.mm
 HOST_MM = app/GibsonApp.mm
-APP_SRCS = main.cpp
 SCN_MM = \
 	scenekit/GibsonSCNScene.mm \
 	scenekit/GibsonSCNCamera.mm
 PREVIEW_MM = scenekit/scn_preview.mm
 
-SCENE_OBJS = $(SCENE_SRCS:.cpp=.o) $(MM_SRCS:.mm=.o)
-APP_OBJS = $(APP_SRCS:.cpp=.o)
 SCN_OBJS = $(SCN_MM:.mm=.o) gibson_settings.o
 SAVER_OBJS = $(SAVER_MM:.mm=.o)
 APPEX_OBJS = $(APPEX_MM:.mm=.o)
 HOST_OBJ = $(HOST_MM:.mm=.o)
 PREVIEW_OBJ = $(PREVIEW_MM:.mm=.o)
-MAIN = gibson
 PREVIEW = scn_preview
 
 SCN_INCLUDES = -I. -Iscenekit -Isaver
@@ -142,35 +70,23 @@ else
   CODESIGN_OPTS := --options runtime --timestamp
 endif
 
-.PHONY: all clean run saver install-saver uninstall-saver enable-saver scn \
+.PHONY: all clean saver install-saver uninstall-saver enable-saver scn \
 	legacy-saver notarize run-app
 
-all: $(MAIN)
+all: saver
 	@echo "It's time to hack the gibson."
-
-$(MAIN): $(SCENE_OBJS) $(APP_OBJS)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $(MAIN) $(SCENE_OBJS) $(APP_OBJS) $(LIBS)
-
-.cpp.o:
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
-
-macos_retina.o: macos_retina.mm
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 scenekit/%.o: scenekit/%.mm
 	$(CXX) $(CXXFLAGS) -fobjc-arc -mmacosx-version-min=$(SHARED_MIN_OS) $(SCN_INCLUDES) -c $< -o $@
 
 gibson_settings.o: gibson_settings.cpp gibson_settings.h
-	$(CXX) $(CXXFLAGS) -mmacosx-version-min=$(SHARED_MIN_OS) $(INCLUDES) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -mmacosx-version-min=$(SHARED_MIN_OS) -I. -c $< -o $@
 
 saver/%.o: saver/%.mm
 	$(CXX) $(CXXFLAGS) -fobjc-arc -mmacosx-version-min=$(SAVER_MIN_OS) $(SCN_INCLUDES) -c $< -o $@
 
 app/%.o: app/%.mm
 	$(CXX) $(CXXFLAGS) -fobjc-arc -mmacosx-version-min=$(SAVER_MIN_OS) $(SCN_INCLUDES) -c $< -o $@
-
-run: $(MAIN)
-	./$(MAIN)
 
 $(PREVIEW): $(SCN_OBJS) $(PREVIEW_OBJ)
 	$(CXX) $(CXXFLAGS) -fobjc-arc $(SCN_INCLUDES) -o $(PREVIEW) $(SCN_OBJS) $(PREVIEW_OBJ) $(PREVIEW_LIBS)
@@ -280,5 +196,5 @@ notarize: saver
 	@echo "Notarized $(APP_DIR)"
 
 clean:
-	rm -f $(SCENE_OBJS) $(APP_OBJS) $(SAVER_OBJS) $(APPEX_OBJS) $(SCN_OBJS) $(HOST_OBJ) $(PREVIEW_OBJ) $(MAIN) $(PREVIEW)
+	rm -f $(SAVER_OBJS) $(APPEX_OBJS) $(SCN_OBJS) $(HOST_OBJ) $(PREVIEW_OBJ) $(PREVIEW)
 	rm -rf "$(DIST)"
