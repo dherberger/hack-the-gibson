@@ -258,7 +258,7 @@ static GibsonSCNScene *g_fullWorld;
     NSImage *tex = [self imageNamed:@"room.png"];
     SCNMaterial *mat = gibson_unlit_material(tex, NO);
     /* Pale cyan traces -> glowing blue-violet circuit lines. */
-    gibson_tint(mat, gibson_rgb(0.34, 0.27, 1.0), 1.7);
+    gibson_tint(mat, gibson_rgb(0.22, 0.30, 1.0), 0.95);
     geom.materials = @[ mat ];
     SCNNode *room = [SCNNode nodeWithGeometry:geom];
     room.name = @"room";
