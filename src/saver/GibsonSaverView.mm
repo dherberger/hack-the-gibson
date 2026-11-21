@@ -4,6 +4,8 @@
 
 #import <QuartzCore/QuartzCore.h>
 #import <SceneKit/SceneKit.h>
+#include <algorithm>
+#include <cmath>
 #include <os/log.h>
 #include <unistd.h>
 
@@ -34,9 +36,69 @@ static NSString *const kSaverDidStart = @"com.apple.screensaver.didstart";
 static NSString *const kSaverWillStop = @"com.apple.screensaver.willstop";
 static NSString *const kSaverDidStop = @"com.apple.screensaver.didstop";
 
+/* An SCNView whose layer keeps a chosen contentsScale and a drawable that
+ * matches it. AppKit resets the layer's scale whenever the view changes window
+ * or display, and SceneKit only resizes its drawable when the view's size
+ * changes, so neither can be set once at creation. */
+@interface GibsonRenderView : SCNView
+@property(nonatomic) CGFloat renderScale;
+@end
+
+@implementation GibsonRenderView
+
+- (void)applyRenderScale
+{
+    CALayer *layer = self.layer;
+    if (_renderScale <= 0 || !layer)
+        return;
+    if (layer.contentsScale != _renderScale)
+        layer.contentsScale = _renderScale;
+    /* SceneKit only resizes its drawable when the view's size changes. */
+    if ([layer isKindOfClass:[CAMetalLayer class]])
+    {
+        const CGSize want = CGSizeMake(std::round(self.bounds.size.width * _renderScale),
+                                       std::round(self.bounds.size.height * _renderScale));
+        CAMetalLayer *metal = (CAMetalLayer *)layer;
+        if (want.width >= 1 && want.height >= 1 && !CGSizeEqualToSize(metal.drawableSize, want))
+            metal.drawableSize = want;
+    }
+}
+
+- (void)setFrameSize:(NSSize)size
+{
+    [super setFrameSize:size];
+    [self applyRenderScale];
+}
+
+- (void)setRenderScale:(CGFloat)scale
+{
+    _renderScale = scale;
+    [self applyRenderScale];
+}
+
+- (void)viewDidChangeBackingProperties
+{
+    [super viewDidChangeBackingProperties];
+    [self applyRenderScale];
+}
+
+- (void)viewDidMoveToWindow
+{
+    [super viewDidMoveToWindow];
+    [self applyRenderScale];
+}
+
+- (void)layout
+{
+    [super layout];
+    [self applyRenderScale];
+}
+
+@end
+
 @implementation GibsonSaverView
 {
-    SCNView *_scnView;
+    GibsonRenderView *_scnView;
     SCNNode *_viewCam;   // this display's slice of the shared view, once known
     BOOL _sessionActive;
     BOOL _musicActive;
@@ -53,6 +115,9 @@ static const CGFloat kMusicMinWidth = 400;
 
 - (NSURL *)mediaURL
 {
+    /* gibson_bench hosts this view outside the appex. */
+    if (const char *dev = std::getenv("GIBSON_MEDIA"))
+        return [NSURL fileURLWithPath:[NSString stringWithUTF8String:dev]];
     NSString *res = [[NSBundle bundleForClass:[self class]] resourcePath];
     return [NSURL fileURLWithPath:[res stringByAppendingPathComponent:@"media"]];
 }
@@ -127,20 +192,38 @@ static const CGFloat kMusicMinWidth = 400;
         return;
     }
 
-    _scnView = [[SCNView alloc] initWithFrame:self.bounds];
+    _scnView = [[GibsonRenderView alloc] initWithFrame:self.bounds];
     _scnView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     _scnView.wantsLayer = YES;
     _scnView.layer.opaque = YES;
-    /* Render below 1x and let it upscale: the film's CG was soft anyway, and
-       fewer pixels keeps the bloom/blur/reflection passes cheap. */
-    _scnView.layer.contentsScale = 0.75;
     [GibsonSCNScene configureView:_scnView preview:self.isPreview mediaURL:media];
     _scnView.preferredFramesPerSecond = self.isPreview ? 30 : 60;
     _scnView.antialiasingMode = SCNAntialiasingModeNone;
     _scnView.playing = NO;
     _scnView.rendersContinuously = NO;
     [self addSubview:_scnView];
+    [self applyRenderSize];
     gibson_log(@"SCNView attached");
+}
+
+/* Render below Retina resolution and let the compositor scale it up: the
+ * film's CG was soft anyway, and the GPU's work is mostly per pixel. SceneKit
+ * sizes its HDR, bloom and motion blur buffers from the view's size in points
+ * at the display's backing scale, so lowering only the layer's scale saved
+ * little. Instead this view's bounds are shrunk, which makes the SCNView
+ * inside it smaller in points while still covering the whole display. */
+- (void)applyRenderSize
+{
+    const NSSize f = self.frame.size;
+    if (!_scnView || f.width < 1 || f.height < 1)
+        return;
+    const CGFloat backing = self.window.backingScaleFactor > 0 ? self.window.backingScaleFactor : 2.0;
+    const CGFloat k = std::min(1.0, std::max(0.2, (double)(gibson_render_scale() / backing)));
+    const NSSize b = NSMakeSize(std::round(f.width * k), std::round(f.height * k));
+    if (!NSEqualSizes(self.bounds.size, b))
+        [self setBoundsSize:b];
+    _scnView.frame = self.bounds;
+    _scnView.renderScale = backing;
 }
 
 - (void)setPlaying:(BOOL)playing
@@ -152,7 +235,7 @@ static const CGFloat kMusicMinWidth = 400;
 - (void)updateMusic
 {
     const BOOL want = _sessionActive && !self.isPreview && self.window != nil
-        && self.bounds.size.width >= kMusicMinWidth;
+        && self.frame.size.width >= kMusicMinWidth && !std::getenv("GIBSON_NO_MUSIC");
     if (want == _musicActive)
         return;
     _musicActive = want;
@@ -170,7 +253,7 @@ static const CGFloat kMusicMinWidth = 400;
 - (NSScreen *)hostScreen
 {
     NSArray<NSScreen *> *screens = [NSScreen screens];
-    const NSSize size = self.bounds.size;
+    const NSSize size = self.frame.size;
     if (!self.window || screens.count == 0 || size.width < 1 || size.height < 1)
         return nil;
 
@@ -230,7 +313,7 @@ static const CGFloat kMusicMinWidth = 400;
     {
         _scnView.pointOfView = _viewCam;
         gibson_log([NSString stringWithFormat:@"spanning: view %.0fx%.0f is %@",
-                    self.bounds.size.width, self.bounds.size.height, screen.localizedName]);
+                    self.frame.size.width, self.frame.size.height, screen.localizedName]);
     }
 }
 
@@ -251,7 +334,7 @@ static const CGFloat kMusicMinWidth = 400;
     gibson_log([NSString stringWithFormat:
         @"diag (%@) pid=%d view=%p bounds=%@ window=%@ winFrame=%@ viewOnScreen=%@ "
         @"winScreen=%@ id=%@ frame=%@",
-        reason, getpid(), self, NSStringFromSize(self.bounds.size),
+        reason, getpid(), self, NSStringFromSize(self.frame.size),
         win ? NSStringFromClass([win class]) : @"(none)",
         NSStringFromRect(win.frame), NSStringFromRect(onScreen),
         ws ? ws.localizedName : @"(none)",
@@ -276,10 +359,30 @@ static const CGFloat kMusicMinWidth = 400;
 {
     const NSSize old = self.frame.size;
     [super setFrameSize:newSize];
+    [self applyRenderSize];
     [self updateMusic];   // the host sizes the view after attaching it
     [self updateProjection];
     if (_sessionActive && !NSEqualSizes(old, newSize))
         [self logDisplayDiagnostics:@"resize"];
+}
+
+/* What the GPU really renders, once the host has settled the view's size. */
+- (void)logDrawableSoon
+{
+    __weak GibsonSaverView *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        GibsonSaverView *me = weakSelf;
+        if (!me || !me->_sessionActive)
+            return;
+        CALayer *layer = me->_scnView.layer;
+        const CGSize px = [layer isKindOfClass:[CAMetalLayer class]]
+                              ? ((CAMetalLayer *)layer).drawableSize
+                              : CGSizeZero;
+        const NSSize pt = me.frame.size;
+        gibson_log([NSString stringWithFormat:@"rendering %.0fx%.0f pt as %.0fx%.0f px (%.2f px/pt)",
+                    pt.width, pt.height, px.width, px.height,
+                    pt.width > 0 ? px.width / pt.width : 0.0]);
+    });
 }
 
 /* Idempotent: called from -viewDidMoveToWindow, -startAnimation and didstart,
@@ -298,7 +401,9 @@ static const CGFloat kMusicMinWidth = 400;
 
     [self logDisplayDiagnostics:reason];
     [self attachSceneIfNeeded];
+    [self applyRenderSize];
     [self updateProjection];
+    [self logDrawableSoon];
     [[GibsonSCNScene sharedWorldForPreview:self.isPreview mediaURL:[self mediaURL]] resetClock];
     [self setPlaying:YES];
     [self updateMusic];
@@ -341,7 +446,7 @@ static const CGFloat kMusicMinWidth = 400;
     [super startAnimation];
     [self beginSession:@"startAnimation"];
     gibson_log([NSString stringWithFormat:@"startAnimation %.0fx%.0f win=%.0fx%.0f",
-                self.bounds.size.width, self.bounds.size.height,
+                self.frame.size.width, self.frame.size.height,
                 self.window.frame.size.width, self.window.frame.size.height]);
 }
 

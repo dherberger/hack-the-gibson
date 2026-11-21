@@ -142,6 +142,8 @@ static NSString *gibson_tower_hue_shader(float phase)
        re-process the bitmap on every swap. */
     SCNGeometry *_darkTowers;
     SCNGeometry *_lightTowers;
+    SCNGeometry *_darkMirror;    // the same, for the reflection under the floor
+    SCNGeometry *_lightMirror;
     NSArray<SCNMaterial *> *_darkTowerMats;
     NSArray<SCNMaterial *> *_lightTowerMats;
     NSInteger _towerFrame;
@@ -335,6 +337,9 @@ static GibsonSCNScene *g_fullWorld;
  * Drawing the towers twice roughly doubles their draw calls, like a
  * reflection pass. */
 #define GIBSON_ORDER_MIRROR (-10)
+/* Mirrored towers further than this from the camera aren't drawn (units; the
+   towers are 30 apart). GIBSON_MIRROR_DIST overrides it for tests; 0 = all. */
+#define MIRROR_DISTANCE 300.f
 #define GIBSON_ORDER_FLOOR (-5)
 
 static float gibson_env_float(const char *name, float fallback, float lo, float hi)
@@ -479,19 +484,38 @@ static NSImage *gibson_trace_mask_image(NSImage *src)
     [_worldRoot addChildNode:lightGroup];
 
     /* Fake reflection: the same towers flipped under the floor, showing only
-       through the floor's see-through traces (see addRoom). Shares geometry
-       and materials, so the text animation and hue shader apply too. */
+       through the floor's see-through traces (see addRoom). Shares materials,
+       so the text animation and hue shader apply too. The mirror is drawn in
+       full and then mostly covered by the floor; through the thin traces only
+       nearby reflections are noticeable, so beyond MIRROR_DISTANCE its towers
+       turn into nothing (a nil level of detail). That halves the GPU's work. */
+    const float mirrorDist = gibson_env_float("GIBSON_MIRROR_DIST", MIRROR_DISTANCE, 0.f, 2000.f);
+    auto mirrorGeometry = [&](SCNGeometry *g) {
+        SCNGeometry *m = [g copy];
+        m.materials = g.materials;
+        if (mirrorDist > 0)
+            m.levelsOfDetail = @[ [SCNLevelOfDetail levelOfDetailWithGeometry:nil
+                                                            worldSpaceDistance:mirrorDist] ];
+        return m;
+    };
+    _darkMirror = mirrorGeometry(darkGeom);
+    _lightMirror = mirrorGeometry(lightGeom);
+
     SCNNode *mirror = [SCNNode node];
     mirror.name = @"tower-mirror";
     mirror.scale = SCNVector3Make(1, -1, 1);
     for (SCNNode *group in @[ darkGroup, lightGroup ])
     {
         SCNNode *copy = [group clone];
+        SCNGeometry *g = (group == darkGroup) ? _darkMirror : _lightMirror;
         /* Fixed draw order: mirror, then the floor over it, then the real
            towers. Left to SceneKit's distance sort, the mirror sometimes
            lands on top of the floor when the camera turns. */
         for (SCNNode *tower in copy.childNodes)
+        {
+            tower.geometry = g;
             tower.renderingOrder = GIBSON_ORDER_MIRROR;
+        }
         [mirror addChildNode:copy];
     }
     [_worldRoot addChildNode:mirror];
@@ -543,6 +567,14 @@ static NSImage *gibson_trace_mask_image(NSImage *src)
     [self tickAtTime:time];
 }
 
+- (void)renderer:(id<SCNSceneRenderer>)renderer didRenderScene:(SCNScene *)scene atTime:(NSTimeInterval)time
+{
+    (void)renderer;
+    (void)scene;
+    (void)time;
+    ++_renderedFrames;   // render-thread only; a torn read in the bench is harmless
+}
+
 - (void)resetClock
 {
     _started = NO;
@@ -572,7 +604,9 @@ static NSImage *gibson_trace_mask_image(NSImage *src)
         _lastTowerSwap = time;
     }
 
-    if (time < _lastTime)
+    /* Every view showing the world calls this once per frame; the first one
+       in a frame moves everything, the rest have nothing to do. */
+    if (time < _lastTime + 1.0 / 240.0 && time != _startTime)
         return;
 
     const float delta = (float)std::min(0.1, std::max(0.0, (double)(time - _lastTime)));
@@ -591,6 +625,8 @@ static NSImage *gibson_trace_mask_image(NSImage *src)
     _towerFrame = (_towerFrame + 1) % TOWER_TEXTURE_COUNT;
     _darkTowers.materials = @[ _darkTowerMats[_towerFrame] ];
     _lightTowers.materials = @[ _lightTowerMats[_towerFrame] ];
+    _darkMirror.materials = _darkTowers.materials;
+    _lightMirror.materials = _lightTowers.materials;
 }
 
 - (void)updatePulses:(float)delta

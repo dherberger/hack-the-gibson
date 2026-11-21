@@ -129,6 +129,8 @@ created on first run:
 | `music_enabled` | `no` | `yes` to loop a soundtrack while the screensaver runs (see [Music](#music)). |
 | `music` | `music.mp3` | The audio file to play, in the same folder as `config.txt`. |
 | `music_volume` | `0.6` | Music volume, 0–1. |
+| `span_displays` | `yes` | With several displays, `yes` makes them windows onto one view (place them with **Arrange Displays…** in the app); `no` shows the same picture on each. |
+| `render_scale` | `1` | Pixels rendered per point, scaled up to the display (0.5–2). `1` is a quarter of a Retina display's pixels; `2` is full Retina, much sharper and about four times the GPU work. The app's **Render quality** menu sets it. |
 
 The saver re-reads the file each time it starts. `make install-saver` never
 overwrites your values, and it adds any new settings to an older file.

@@ -20,6 +20,7 @@ static const GibsonSettings kDefaults = {
     .music_volume = 0.6f,
     .music_enabled = 0,
     .span_displays = 1,
+    .render_scale = 1.f,
 };
 /* Music lives next to config.txt: it is the one folder the sandboxed
  * screensaver may read. Relative names resolve against that folder. */
@@ -53,7 +54,12 @@ static const char *kTemplate =
     "# shared view; no gives every display the same picture. The display_… lines\n"
     "# are written by Arrange Displays in the app (each display's centre in mm,\n"
     "# then how far it leans back in degrees).\n"
-    "span_displays = yes\n";
+    "span_displays = yes\n"
+    "#\n"
+    "# render_scale — pixels rendered per point, then scaled up to the display.\n"
+    "# 1 is a quarter of a Retina display's pixels; 2 is full Retina\n"
+    "# resolution (sharpest, and much harder on the GPU). 0.5 to 2.\n"
+    "render_scale = 1\n";
 
 static GibsonSettings g_settings = kDefaults;
 static std::string g_music = kDefaultMusic;
@@ -132,6 +138,13 @@ static bool parse_file(const std::string &path, GibsonSettings *out)
             for (auto &c : v)
                 c = (char)std::tolower((unsigned char)c);
             out->span_displays = (v == "no" || v == "false" || v == "off" || v == "0") ? 0 : 1;
+        }
+        else if (key == "render_scale" || key == "render-scale")
+        {
+            char *end = nullptr;
+            float v = std::strtof(val.c_str(), &end);
+            if (end != val.c_str())
+                out->render_scale = v < 0.5f ? 0.5f : (v > 2.f ? 2.f : v);
         }
         else if (key == "music")
         {
@@ -431,6 +444,12 @@ int gibson_span_displays(void)
 {
     ensure_loaded();
     return g_settings.span_displays;
+}
+
+float gibson_render_scale(void)
+{
+    ensure_loaded();
+    return g_settings.render_scale;
 }
 
 const char *gibson_settings_raw(const char *key)

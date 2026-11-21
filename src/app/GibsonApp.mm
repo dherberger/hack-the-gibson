@@ -7,6 +7,7 @@
 #import <SceneKit/SceneKit.h>
 
 #include "gibson_settings.h"
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -142,6 +143,7 @@ static double gibson_setting_value(const char *key)
     AVAudioPlayer *_testPlayer;
     NSButton *_spanDisplays;
     NSButton *_arrangeButton;
+    NSPopUpButton *_quality;
     GibsonArrangeController *_arrange;
 }
 
@@ -156,6 +158,18 @@ static double gibson_setting_value(const char *key)
         NSLog(@"The Gibson: couldn't write %s to config.txt", key);
     [self reloadSettings];
 }
+
+struct GibsonQuality
+{
+    NSString *title;
+    float scale;   // render_scale
+};
+static const GibsonQuality kQualities[] = {
+    {@"Light (0.75×)", 0.75f},
+    {@"Balanced (1×)", 1.f},
+    {@"Sharp (1.5×)", 1.5f},
+    {@"Full Retina (2×)", 2.f},
+};
 
 static NSTextField *gibson_label(NSString *text)
 {
@@ -236,6 +250,19 @@ static NSTextField *gibson_header(NSString *text)
     [rows addObject:@[ gibson_label(@""), gibson_header(@"Displays") ]];
     [rows addObject:@[ gibson_label(@""), _spanDisplays ]];
     [rows addObject:@[ gibson_label(@""), _arrangeButton ]];
+    _quality = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+    for (const GibsonQuality &q : kQualities)
+    {
+        [_quality addItemWithTitle:q.title];
+        _quality.lastItem.representedObject = @(q.scale);
+    }
+    _quality.target = self;
+    _quality.action = @selector(qualityChanged:);
+    [rows addObject:@[ gibson_label(@"Render quality:"), _quality ]];
+    [rows addObject:@[ gibson_label(@""),
+                       gibson_note(@"Pixels rendered per point, scaled up to the display. "
+                                   @"Balanced is about a quarter of Full Retina's GPU work; "
+                                   @"higher settings sharpen the picture and spin up fans.") ]];
     [rows addObject:@[ gibson_label(@""),
                        gibson_note(@"Changes are saved right away and apply the next time "
                                    @"the screensaver starts.") ]];
@@ -307,6 +334,14 @@ static NSTextField *gibson_header(NSString *text)
     const BOOL span = gibson_span_displays() != 0;
     _spanDisplays.state = span ? NSControlStateValueOn : NSControlStateValueOff;
     _arrangeButton.enabled = span && [NSScreen screens].count > 1;
+    /* The nearest preset to what config.txt says. */
+    const float scale = gibson_render_scale();
+    NSMenuItem *best = nil;
+    for (NSMenuItem *item in _quality.itemArray)
+        if (!best || std::fabs([item.representedObject floatValue] - scale)
+                         < std::fabs([best.representedObject floatValue] - scale))
+            best = item;
+    [_quality selectItem:best];
 
     for (int i = 0; i < kSliderCount; ++i)
     {
@@ -335,6 +370,13 @@ static NSTextField *gibson_header(NSString *text)
     [self write:"music_enabled" value:on ? @"yes" : @"no"];
     if (on && ![self musicPathForName:[NSString stringWithUTF8String:gibson_music_setting()]])
         [self write:"music" value:@"music.mp3"];   // was `off`
+    [self refreshControls];
+}
+
+- (void)qualityChanged:(NSPopUpButton *)sender
+{
+    [self write:"render_scale"
+          value:[NSString stringWithFormat:@"%g", [sender.selectedItem.representedObject floatValue]]];
     [self refreshControls];
 }
 

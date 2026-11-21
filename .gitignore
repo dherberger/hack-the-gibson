@@ -38,6 +38,7 @@ Makefile.bak
 # Project binaries
 src/gibson
 src/scn_preview
+src/gibson_bench
 
 # Screensaver bundle
 dist/

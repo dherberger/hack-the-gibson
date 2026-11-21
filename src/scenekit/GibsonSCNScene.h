@@ -12,6 +12,8 @@
 + (instancetype)sharedWorldForPreview:(BOOL)preview mediaURL:(NSURL *)mediaURL;
 + (void)configureView:(SCNView *)view preview:(BOOL)preview mediaURL:(NSURL *)mediaURL;
 - (void)tickAtTime:(NSTimeInterval)time;
+/* Frames drawn by all views showing this world, for benchmarking. */
+@property (nonatomic, readonly) NSUInteger renderedFrames;
 
 /* Multi-monitor spanning (see GibsonWall.h). A view camera rides the shared
  * fly camera; give it the projection and orientation for the display it is

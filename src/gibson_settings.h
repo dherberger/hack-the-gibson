@@ -13,6 +13,7 @@ typedef struct GibsonSettings {
     float music_volume;
     int music_enabled;
     int span_displays;
+    float render_scale;
 } GibsonSettings;
 
 /* extra_dir is searched for config.txt (saver Resources, project root, …). */
@@ -24,6 +25,8 @@ float gibson_bank_max_degrees(void);
 float gibson_bank_smoothing(void);
 /* With several displays: 1 to treat them as windows onto one shared view. */
 int gibson_span_displays(void);
+/* Pixels rendered per point (0.5–2); the result is scaled up to the display. */
+float gibson_render_scale(void);
 /* Any `key = value` line from the loaded config.txt as written, or "" when
  * absent. Used for per-display keys that aren't known ahead of time. */
 const char *gibson_settings_raw(const char *key);

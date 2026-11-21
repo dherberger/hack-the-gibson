@@ -4,6 +4,7 @@
 # 'make install-saver'  install to /Applications, register, restart WallpaperAgent
 # 'make enable-saver'   also set it as the idle / hot-corner screensaver
 # 'make scn'            build and launch the SceneKit preview window
+# 'make bench'          measure the screensaver on every display (dev only)
 # 'make run-app'        open dist/TheGibson.app (settings window + preview)
 # 'make legacy-saver'   build the classic .saver plug-in (macOS 11+)
 # 'make clean'          remove objects, executables, and dist bundles
@@ -32,6 +33,7 @@ APPEX_OBJS = $(APPEX_MM:.mm=.o)
 HOST_OBJ = $(HOST_MM:.mm=.o)
 PREVIEW_OBJ = $(PREVIEW_MM:.mm=.o)
 PREVIEW = scn_preview
+BENCH = gibson_bench
 
 SCN_INCLUDES = -I. -Iscenekit -Isaver
 SCN_FRAMEWORKS = SceneKit ModelIO QuartzCore Metal Cocoa Foundation AppKit CoreGraphics
@@ -73,7 +75,7 @@ else
 endif
 
 .PHONY: all clean saver install-saver uninstall-saver enable-saver scn \
-	legacy-saver notarize run-app
+	legacy-saver notarize run-app bench
 
 all: saver
 	@echo "It's time to hack the gibson."
@@ -95,6 +97,12 @@ $(PREVIEW): $(SCN_OBJS) $(PREVIEW_OBJ)
 
 scn: $(PREVIEW)
 	./$(PREVIEW)
+
+$(BENCH): $(SCN_OBJS) $(SAVER_OBJS) saver/gibson_bench.o
+	$(CXX) $(CXXFLAGS) -fobjc-arc -o $(BENCH) $(SCN_OBJS) $(SAVER_OBJS) saver/gibson_bench.o $(SAVER_SCN_LIBS) -framework IOKit
+
+bench: $(BENCH)
+	./$(BENCH)
 
 saver: $(APP_BIN)
 
@@ -198,5 +206,5 @@ notarize: saver
 	@echo "Notarized $(APP_DIR)"
 
 clean:
-	rm -f $(SAVER_OBJS) $(APPEX_OBJS) $(SCN_OBJS) $(HOST_OBJ) $(PREVIEW_OBJ) $(PREVIEW)
+	rm -f $(SAVER_OBJS) $(APPEX_OBJS) $(SCN_OBJS) $(HOST_OBJ) $(PREVIEW_OBJ) $(PREVIEW) saver/gibson_bench.o $(BENCH)
 	rm -rf "$(DIST)"
