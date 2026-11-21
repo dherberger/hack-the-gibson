@@ -68,6 +68,92 @@ static int gibson_write_snapshot(NSURL *media, const char *outPath)
     return 0;
 }
 
+static BOOL gibson_write_png(NSImage *image, NSString *path)
+{
+    NSBitmapImageRep *rep = [NSBitmapImageRep imageRepWithData:[image TIFFRepresentation]];
+    NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+    return [png writeToFile:path atomically:YES];
+}
+
+/* Multi-monitor check: render each attached display's slice of the wall and
+ * paste them together (wall.png), next to one render of the wall's whole
+ * bounding box (wall_ref.png). Where there are screens, the two should match
+ * (tilted displays are pasted flat, so those only match roughly). */
+static int gibson_write_wall(NSURL *media, const char *dir, double atTime)
+{
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    if (!device)
+    {
+        std::fprintf(stderr, "No Metal device.\n");
+        return 1;
+    }
+    NSString *outDir = [NSString stringWithUTF8String:dir];
+    [[NSFileManager defaultManager] createDirectoryAtPath:outDir
+                              withIntermediateDirectories:YES attributes:nil error:nil];
+    GibsonSCNScene *world = [GibsonSCNScene sharedWorldForPreview:NO mediaURL:media];
+    SCNRenderer *renderer = [SCNRenderer rendererWithDevice:device options:nil];
+    renderer.scene = world.scene;
+    renderer.autoenablesDefaultLighting = NO;
+
+    const double step = 1.0 / 60.0;
+    double t = 0.0;
+    [world tickAtTime:t];
+    while (t + step <= atTime)
+    {
+        t += step;
+        [world tickAtTime:t];
+    }
+
+    SCNMatrix4 boundsProj;
+    CGFloat aspect = 1;
+    if (![GibsonSCNScene wallBoundsProjection:&boundsProj aspect:&aspect])
+    {
+        std::fprintf(stderr, "No screens.\n");
+        return 1;
+    }
+    const CGFloat canvasW = 1600;
+    const CGFloat canvasH = std::round(canvasW / aspect);
+
+    SCNNode *cam = [world makeViewCameraNode];
+    cam.camera.motionBlurIntensity = 0.0;
+    renderer.pointOfView = cam;
+
+    cam.camera.projectionTransform = boundsProj;
+    cam.simdOrientation = simd_quaternion(0.f, 0.f, 0.f, 1.f);
+    NSImage *ref = [renderer snapshotAtTime:t withSize:NSMakeSize(canvasW, canvasH)
+                           antialiasingMode:SCNAntialiasingModeMultisampling4X];
+    gibson_write_png(ref, [outDir stringByAppendingPathComponent:@"wall_ref.png"]);
+
+    NSImage *canvas = [[NSImage alloc] initWithSize:NSMakeSize(canvasW, canvasH)];
+    [canvas lockFocus];
+    [[NSColor colorWithCalibratedRed:0.25 green:0.0 blue:0.0 alpha:1.0] setFill];
+    NSRectFill(NSMakeRect(0, 0, canvasW, canvasH));
+    [canvas unlockFocus];
+    for (NSScreen *screen in [NSScreen screens])
+    {
+        SCNMatrix4 proj;
+        simd_quatf orient;
+        if (![GibsonSCNScene wallProjection:&proj orientation:&orient forScreen:screen])
+            continue;
+        cam.simdOrientation = orient;
+        const NSRect u = [GibsonSCNScene wallUnitRectForScreen:screen];
+        const NSRect dst = NSMakeRect(u.origin.x * canvasW, u.origin.y * canvasH,
+                                      u.size.width * canvasW, u.size.height * canvasH);
+        cam.camera.projectionTransform = proj;
+        NSImage *img = [renderer snapshotAtTime:t withSize:dst.size
+                               antialiasingMode:SCNAntialiasingModeMultisampling4X];
+        [canvas lockFocus];
+        [img drawInRect:dst fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1.0];
+        [canvas unlockFocus];
+        std::fprintf(stderr, "%s: slice %.3f,%.3f %.3fx%.3f of the wall\n",
+                     screen.localizedName.UTF8String, u.origin.x, u.origin.y,
+                     u.size.width, u.size.height);
+    }
+    gibson_write_png(canvas, [outDir stringByAppendingPathComponent:@"wall.png"]);
+    std::fprintf(stderr, "Wrote wall.png and wall_ref.png to %s\n", dir);
+    return 0;
+}
+
 /* Step simulated time at 60 Hz from t=0 and write a PNG every `interval` s,
  * for frame-by-frame comparison with reference footage. */
 static int gibson_write_sequence(NSURL *media, const char *dir, int count, double interval,
@@ -127,12 +213,18 @@ int main(int argc, char **argv)
     NSSize sequenceSize = NSMakeSize(1185, 510);
     BOOL preview = NO;
     const char *snapshotPath = nullptr;
+    const char *wallDir = nullptr;
+    double wallTime = 6.0;
     for (int i = 1; i < argc; ++i)
     {
         if (std::strcmp(argv[i], "--preview") == 0)
             preview = YES;
         else if (std::strcmp(argv[i], "--snapshot") == 0 && i + 1 < argc)
             snapshotPath = argv[++i];
+        else if (std::strcmp(argv[i], "--wall") == 0 && i + 1 < argc)
+            wallDir = argv[++i];
+        else if (std::strcmp(argv[i], "--at") == 0 && i + 1 < argc)
+            wallTime = std::atof(argv[++i]);
         else if (std::strcmp(argv[i], "--sequence") == 0 && i + 1 < argc)
             sequenceDir = argv[++i];
         else if (std::strcmp(argv[i], "--count") == 0 && i + 1 < argc)
@@ -148,8 +240,9 @@ int main(int argc, char **argv)
         {
             std::fprintf(stderr,
                          "Usage: %s [--preview] [--snapshot out.png]\n"
-                         "       %s --sequence DIR [--count 18] [--interval 0.5] [--size 1185 510]\n",
-                         argv[0], argv[0]);
+                         "       %s --sequence DIR [--count 18] [--interval 0.5] [--size 1185 510]\n"
+                         "       %s --wall DIR [--at 6.0]   (multi-monitor slices vs. reference)\n",
+                         argv[0], argv[0], argv[0]);
             return 0;
         }
     }
@@ -168,6 +261,8 @@ int main(int argc, char **argv)
         [NSApplication sharedApplication];
         if (snapshotPath)
             return gibson_write_snapshot(media, snapshotPath);
+        if (wallDir)
+            return gibson_write_wall(media, wallDir, wallTime);
         if (sequenceDir)
             return gibson_write_sequence(media, sequenceDir, sequenceCount, sequenceInterval,
                                          sequenceSize);

@@ -19,10 +19,11 @@ SAVER_MM = saver/GibsonSaverView.mm saver/GibsonMusic.mm
 APPEX_MM = \
 	saver/GibsonScreenSaverExtension.mm \
 	saver/GibsonScreenSaverViewController.mm
-HOST_MM = app/GibsonApp.mm
+HOST_MM = app/GibsonApp.mm app/GibsonArrange.mm app/GibsonLidAngle.mm
 SCN_MM = \
 	scenekit/GibsonSCNScene.mm \
-	scenekit/GibsonSCNCamera.mm
+	scenekit/GibsonSCNCamera.mm \
+	scenekit/GibsonWallScreens.mm
 PREVIEW_MM = scenekit/scn_preview.mm
 
 SCN_OBJS = $(SCN_MM:.mm=.o) gibson_settings.o
@@ -40,7 +41,7 @@ SAVER_SCN_LIBS = \
 APPEX_LIBS = $(SAVER_SCN_LIBS) -framework ExtensionFoundation
 PREVIEW_LIBS = \
 	$(foreach n,$(SCN_FRAMEWORKS),-framework $n)
-HOST_LIBS = $(PREVIEW_LIBS) -framework AVFoundation -framework UniformTypeIdentifiers
+HOST_LIBS = $(PREVIEW_LIBS) -framework AVFoundation -framework UniformTypeIdentifiers -framework IOKit
 
 ROOT := $(abspath ..)
 DIST := $(ROOT)/dist

@@ -1,5 +1,8 @@
 #import "GibsonSCNScene.h"
 #import "GibsonSCNCamera.h"
+#import "GibsonWallScreens.h"
+
+#import <AppKit/AppKit.h>
 
 #import <ModelIO/ModelIO.h>
 #import <SceneKit/ModelIO.h>
@@ -187,6 +190,63 @@ static GibsonSCNScene *g_fullWorld;
 - (SCNNode *)cameraNode
 {
     return _flyCam.cameraNode;
+}
+
+- (SCNNode *)makeViewCameraNode
+{
+    SCNNode *rig = _flyCam.cameraNode;
+    SCNNode *node = [SCNNode node];
+    node.name = @"gibson-view-camera";
+    node.camera = [rig.camera copy];
+    [rig addChildNode:node];
+    return node;
+}
+
++ (BOOL)wallProjection:(SCNMatrix4 *)outProjection
+           orientation:(simd_quatf *)outOrientation
+             forScreen:(NSScreen *)screen
+{
+    const NSUInteger index = [[NSScreen screens] indexOfObject:screen];
+    if (index == NSNotFound)
+        return NO;
+    const std::vector<GibsonWallScreen> screens = gibson_wall_screens();
+    GibsonWallView view;
+    if (!gibson_wall_view(screens.data(), (int)screens.size(), (int)index, &view))
+        return NO;
+    *outProjection = SCNMatrix4FromMat4(
+        gibson_wall_projection(view.slice, GIBSON_CAM_Z_NEAR, GIBSON_CAM_Z_FAR));
+    *outOrientation = simd_quaternion(view.basis);
+    return YES;
+}
+
++ (NSRect)wallUnitRectForScreen:(NSScreen *)screen
+{
+    const NSUInteger index = [[NSScreen screens] indexOfObject:screen];
+    const std::vector<GibsonWallScreen> screens = gibson_wall_screens();
+    if (index == NSNotFound || index >= screens.size())
+        return NSZeroRect;
+    const GibsonWallRect u = gibson_wall_bounds(screens.data(), (int)screens.size());
+    const GibsonWallRect r = gibson_wall_rect(screens.data(), (int)screens.size(), (int)index);
+    const double w = u.x1 - u.x0, h = u.y1 - u.y0;
+    if (w <= 0 || h <= 0)
+        return NSZeroRect;
+    return NSMakeRect((r.x0 - u.x0) / w, (r.y0 - u.y0) / h, (r.x1 - r.x0) / w, (r.y1 - r.y0) / h);
+}
+
++ (BOOL)wallBoundsProjection:(SCNMatrix4 *)outProjection aspect:(CGFloat *)outAspect
+{
+    const std::vector<GibsonWallScreen> screens = gibson_wall_screens();
+    if (screens.empty())
+        return NO;
+    const GibsonWallRect u = gibson_wall_bounds(screens.data(), (int)screens.size());
+    if (u.x1 - u.x0 <= 0 || u.y1 - u.y0 <= 0)
+        return NO;
+    const GibsonWallSlice slice =
+        gibson_wall_view_for(gibson_wall_eye(u), gibson_wall_plane(u, 0.0, 0.0)).slice;
+    *outProjection = SCNMatrix4FromMat4(
+        gibson_wall_projection(slice, GIBSON_CAM_Z_NEAR, GIBSON_CAM_Z_FAR));
+    *outAspect = (u.x1 - u.x0) / (u.y1 - u.y0);
+    return YES;
 }
 
 - (instancetype)initWithPreview:(BOOL)preview mediaURL:(NSURL *)mediaURL
@@ -486,6 +546,20 @@ static NSImage *gibson_trace_mask_image(NSImage *src)
 - (void)resetClock
 {
     _started = NO;
+}
+
+- (void)seekToTime:(NSTimeInterval)time
+{
+    time = std::max(0.0, time);
+    _started = YES;
+    _startTime = 0;
+    /* Banking follows the recent path, so fly the last few seconds in. */
+    [_flyCam resetSmoothing];
+    for (NSTimeInterval t = std::max(0.0, time - 3.0); t < time; t += 1.0 / 60.0)
+        [_flyCam updateAtTime:t startTime:0];
+    [_flyCam updateAtTime:time startTime:0];
+    _lastTime = time;
+    _lastTowerSwap = time;
 }
 
 - (void)tickAtTime:(NSTimeInterval)time

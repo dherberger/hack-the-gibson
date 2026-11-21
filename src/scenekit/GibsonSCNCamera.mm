@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 #import <simd/simd.h>
 
@@ -131,8 +132,8 @@ static simd_float3 gibson_safe_norm(simd_float3 v, simd_float3 fallback)
 
     SCNCamera *cam = [SCNCamera camera];
     cam.fieldOfView = 72.0;
-    cam.zNear = 0.5;
-    cam.zFar = 900.0;
+    cam.zNear = GIBSON_CAM_Z_NEAR;
+    cam.zFar = GIBSON_CAM_Z_FAR;
     /* Movie grade: saturated cyan/violet with heavy glow and streaky motion.
        HDR lets materials push past 1.0 so only the bright traces, tower caps
        and pulses cross the bloom threshold. */
@@ -228,6 +229,77 @@ static simd_float3 gibson_safe_norm(simd_float3 v, simd_float3 fallback)
     }
 
     [self aimWithForward:forward up:worldUp position:pos];
+}
+
+- (void)resetSmoothing
+{
+    _bank = 0.f;
+    _yawRate = 0.f;
+    _lastElapsedMs = -1.f;
+}
+
++ (NSTimeInterval)loopDuration
+{
+    const float speed = std::max(0.01f, gibson_fly_speed());
+    return 2.0 * (GIBSON_FLY_PATH_COUNT - 1) / speed;
+}
+
++ (NSArray<NSDictionary *> *)flightMoments
+{
+    const float speed = std::max(0.01f, gibson_fly_speed());
+    const double loop = [self loopDuration];
+    const double step = 0.25;
+    const int n = (int)(loop / step);
+    const float eps = 0.14f;
+
+    /* Per sample: 0 straight, 1 turning left, 2 turning right, 3 up high. */
+    std::vector<int> kind(n);
+    std::vector<float> turn(n);
+    float maxTurn = 0.f;
+    for (int i = 0; i < n; ++i)
+    {
+        const float dt = (float)(i * step) * speed;
+        const simd_float3 a = gibson_safe_norm(
+            gibson_v(gibson_spline_at(dt)) - gibson_v(gibson_spline_at(dt - eps)), simd_make_float3(0, 0, 1));
+        const simd_float3 b = gibson_safe_norm(
+            gibson_v(gibson_spline_at(dt + eps)) - gibson_v(gibson_spline_at(dt)), simd_make_float3(0, 0, 1));
+        turn[i] = simd_dot(simd_cross(a, b), simd_make_float3(0, 1, 0));
+        maxTurn = std::max(maxTurn, std::fabs(turn[i]));
+    }
+    for (int i = 0; i < n; ++i)
+    {
+        const float y = (float)gibson_spline_at((float)(i * step) * speed).y;
+        if (y > 30.f)
+            kind[i] = 3;
+        else if (std::fabs(turn[i]) > maxTurn * 0.35f)
+            kind[i] = turn[i] > 0 ? 1 : 2;
+        else
+            kind[i] = 0;
+    }
+
+    /* One moment per stretch long enough to look at: the sharpest point of a
+       turn, otherwise the middle. */
+    NSArray<NSString *> *names = @[ @"Straight run", @"Turning left", @"Turning right", @"Rooftop swoop" ];
+    NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
+    int start = 0;
+    for (int i = 1; i <= n; ++i)
+    {
+        if (i < n && kind[i] == kind[start])
+            continue;
+        if ((i - start) * step >= 1.5)
+        {
+            int pick = (start + i) / 2;
+            if (kind[start] == 1 || kind[start] == 2)
+                for (int k = start; k < i; ++k)
+                    if (std::fabs(turn[k]) > std::fabs(turn[pick]))
+                        pick = k;
+            /* The camera trails the look-at point; show it once it's in the stretch. */
+            const double t = pick * step + GIBSON_FLY_LOOKAHEAD_MS * 0.001;
+            [out addObject:@{ @"time" : @(t), @"name" : names[kind[start]] }];
+        }
+        start = i;
+    }
+    return out;
 }
 
 @end

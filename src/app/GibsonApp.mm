@@ -1,4 +1,5 @@
 #import "GibsonSCNScene.h"
+#import "GibsonArrange.h"
 
 #import <AVFoundation/AVFoundation.h>
 #import <Cocoa/Cocoa.h>
@@ -123,6 +124,7 @@ static double gibson_setting_value(const char *key)
 
 @interface GibsonAppController : NSObject <NSApplicationDelegate, NSWindowDelegate>
 @property(nonatomic, strong) NSURL *media;
+@property(nonatomic) BOOL openArrange;   // --arrange: go straight to Arrange Displays
 @end
 
 @implementation GibsonAppController
@@ -138,6 +140,9 @@ static double gibson_setting_value(const char *key)
     NSSlider *_sliders[kSliderCount];
     NSTextField *_sliderLabels[kSliderCount];
     AVAudioPlayer *_testPlayer;
+    NSButton *_spanDisplays;
+    NSButton *_arrangeButton;
+    GibsonArrangeController *_arrange;
 }
 
 - (void)reloadSettings
@@ -223,6 +228,14 @@ static NSTextField *gibson_header(NSString *text)
         NSStackView *row = [NSStackView stackViewWithViews:@[ _sliders[i], _sliderLabels[i] ]];
         [rows addObject:@[ gibson_label([kSliders[i].label stringByAppendingString:@":"]), row ]];
     }
+    const NSInteger displaysRow = rows.count;
+    _spanDisplays = [NSButton checkboxWithTitle:@"Span all displays as one view"
+                                         target:self action:@selector(toggleSpan:)];
+    _arrangeButton = [NSButton buttonWithTitle:@"Arrange Displays…" target:self
+                                        action:@selector(showArrange:)];
+    [rows addObject:@[ gibson_label(@""), gibson_header(@"Displays") ]];
+    [rows addObject:@[ gibson_label(@""), _spanDisplays ]];
+    [rows addObject:@[ gibson_label(@""), _arrangeButton ]];
     [rows addObject:@[ gibson_label(@""),
                        gibson_note(@"Changes are saved right away and apply the next time "
                                    @"the screensaver starts.") ]];
@@ -234,6 +247,7 @@ static NSTextField *gibson_header(NSString *text)
     for (NSInteger r = 0; r < grid.numberOfRows; ++r)
         [grid rowAtIndex:r].yPlacement = NSGridCellPlacementCenter;
     [grid rowAtIndex:5].topPadding = 10;   // "Flight" header
+    [grid rowAtIndex:displaysRow].topPadding = 10;
 
     NSButton *preview = [NSButton buttonWithTitle:@"Preview" target:self action:@selector(showPreview:)];
     preview.keyEquivalent = @"\r";
@@ -290,6 +304,10 @@ static NSTextField *gibson_header(NSString *text)
     _volume.doubleValue = gibson_setting_value("music_volume");
     _volumeLabel.stringValue = [NSString stringWithFormat:@"%3.0f%%", _volume.doubleValue * 100];
 
+    const BOOL span = gibson_span_displays() != 0;
+    _spanDisplays.state = span ? NSControlStateValueOn : NSControlStateValueOff;
+    _arrangeButton.enabled = span && [NSScreen screens].count > 1;
+
     for (int i = 0; i < kSliderCount; ++i)
     {
         _sliders[i].doubleValue = gibson_setting_value(kSliders[i].key);
@@ -318,6 +336,20 @@ static NSTextField *gibson_header(NSString *text)
     if (on && ![self musicPathForName:[NSString stringWithUTF8String:gibson_music_setting()]])
         [self write:"music" value:@"music.mp3"];   // was `off`
     [self refreshControls];
+}
+
+- (void)toggleSpan:(NSButton *)sender
+{
+    [self write:"span_displays" value:sender.state == NSControlStateValueOn ? @"yes" : @"no"];
+    [self refreshControls];
+}
+
+- (void)showArrange:(id)sender
+{
+    if (!_arrange)
+        _arrange = [[GibsonArrangeController alloc] init];
+    _arrange.media = _media;
+    [_arrange show];
 }
 
 - (void)sliderMoved:(NSSlider *)sender
@@ -440,7 +472,10 @@ static NSTextField *gibson_header(NSString *text)
         _preview = nil;
     }
     else if (note.object == _settings)
+    {
         [self stopTest];
+        [_arrange close];
+    }
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app
@@ -489,6 +524,8 @@ static NSTextField *gibson_header(NSString *text)
     [self buildMenu];
     [self buildSettingsWindow];
     [_settings makeKeyAndOrderFront:nil];
+    if (_openArrange)
+        [self showArrange:nil];
 
     // Escape or Q closes the preview (not the app).
     __weak GibsonAppController *weakSelf = self;
@@ -515,14 +552,17 @@ static NSTextField *gibson_header(NSString *text)
 int main(int argc, char **argv)
 {
     BOOL registerOnly = NO;
+    BOOL openArrange = NO;
     for (int i = 1; i < argc; ++i)
     {
         if (std::strcmp(argv[i], "--register") == 0)
             registerOnly = YES;
+        else if (std::strcmp(argv[i], "--arrange") == 0)
+            openArrange = YES;
         else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0)
         {
             std::fprintf(stderr,
-                         "Usage: %s [--register]\n"
+                         "Usage: %s [--register] [--arrange]\n"
                          "  Host app for The Gibson screensaver: a settings window and a\n"
                          "  flythrough preview. Opening the installed copy in /Applications\n"
                          "  also registers the Screen Saver extension.\n",
@@ -552,6 +592,7 @@ int main(int argc, char **argv)
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
         GibsonAppController *controller = [[GibsonAppController alloc] init];
         controller.media = media;
+        controller.openArrange = openArrange;
         NSApp.delegate = controller;
         [NSApp run];
         return 0;

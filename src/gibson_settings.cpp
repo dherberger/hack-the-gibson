@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <string>
 #include <pwd.h>
 #include <sys/stat.h>
@@ -18,6 +19,7 @@ static const GibsonSettings kDefaults = {
     .bank_smoothing = 0.55f,
     .music_volume = 0.6f,
     .music_enabled = 0,
+    .span_displays = 1,
 };
 /* Music lives next to config.txt: it is the one folder the sandboxed
  * screensaver may read. Relative names resolve against that folder. */
@@ -45,12 +47,19 @@ static const char *kTemplate =
     "# music_volume — 0 to 1.\n"
     "music_enabled = no\n"
     "music = music.mp3\n"
-    "music_volume = 0.6\n";
+    "music_volume = 0.6\n"
+    "#\n"
+    "# span_displays — with several displays, yes makes them windows onto one\n"
+    "# shared view; no gives every display the same picture. The display_… lines\n"
+    "# are written by Arrange Displays in the app (each display's centre in mm,\n"
+    "# then how far it leans back in degrees).\n"
+    "span_displays = yes\n";
 
 static GibsonSettings g_settings = kDefaults;
 static std::string g_music = kDefaultMusic;
 static std::string g_music_resolved;
 static std::string g_path;
+static std::map<std::string, std::string> g_raw;
 static bool g_loaded;
 
 static std::string trim(std::string s)
@@ -104,6 +113,7 @@ static bool parse_file(const std::string &path, GibsonSettings *out)
     if (!fp)
         return false;
 
+    g_raw.clear();
     char line[512];
     while (fgets(line, sizeof(line), fp))
     {
@@ -115,7 +125,15 @@ static bool parse_file(const std::string &path, GibsonSettings *out)
             continue;
         std::string key = trim(s.substr(0, eq));
         std::string val = trim(s.substr(eq + 1));
-        if (key == "music")
+        g_raw[key] = val;
+        if (key == "span_displays" || key == "span-displays")
+        {
+            std::string v = val;
+            for (auto &c : v)
+                c = (char)std::tolower((unsigned char)c);
+            out->span_displays = (v == "no" || v == "false" || v == "off" || v == "0") ? 0 : 1;
+        }
+        else if (key == "music")
         {
             g_music = val;
         }
@@ -313,6 +331,10 @@ static void append_missing_keys(const std::string &path)
         {"music_volume",
          "# music_volume — 0 to 1.\n"
          "music_volume = 0.6\n"},
+        {"span_displays",
+         "\n# span_displays — with several displays, yes makes them windows onto\n"
+         "# one shared view; no gives every display the same picture.\n"
+         "span_displays = yes\n"},
     };
     std::string add;
     for (const auto &e : extras)
@@ -337,6 +359,7 @@ void gibson_settings_reload(const char *extra_dir)
     g_music = kDefaultMusic;
     g_music_resolved.clear();
     g_path.clear();
+    g_raw.clear();
 
     std::vector<std::string> candidates;
     for (const auto &user : user_config_paths())
@@ -402,6 +425,19 @@ float gibson_bank_smoothing(void)
 {
     ensure_loaded();
     return g_settings.bank_smoothing;
+}
+
+int gibson_span_displays(void)
+{
+    ensure_loaded();
+    return g_settings.span_displays;
+}
+
+const char *gibson_settings_raw(const char *key)
+{
+    ensure_loaded();
+    const auto it = key ? g_raw.find(key) : g_raw.end();
+    return it == g_raw.end() ? "" : it->second.c_str();
 }
 
 const char *gibson_settings_path(void)

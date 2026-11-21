@@ -5,6 +5,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <SceneKit/SceneKit.h>
 #include <os/log.h>
+#include <unistd.h>
 
 #include "gibson_settings.h"
 
@@ -36,6 +37,7 @@ static NSString *const kSaverDidStop = @"com.apple.screensaver.didstop";
 @implementation GibsonSaverView
 {
     SCNView *_scnView;
+    SCNNode *_viewCam;   // this display's slice of the shared view, once known
     BOOL _sessionActive;
     BOOL _musicActive;
 }
@@ -68,6 +70,10 @@ static const CGFloat kMusicMinWidth = 400;
     [dnc addObserver:self selector:@selector(saverDidStart:) name:kSaverDidStart object:nil];
     [dnc addObserver:self selector:@selector(saverWillStop:) name:kSaverWillStop object:nil];
     [dnc addObserver:self selector:@selector(saverWillStop:) name:kSaverDidStop object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(screensChanged:)
+                                                 name:NSApplicationDidChangeScreenParametersNotification
+                                               object:nil];
 }
 
 - (instancetype)initWithFrame:(NSRect)frame isPreview:(BOOL)isPreview
@@ -98,6 +104,8 @@ static const CGFloat kMusicMinWidth = 400;
 - (void)dealloc
 {
     [[NSDistributedNotificationCenter defaultCenter] removeObserver:self];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [_viewCam removeFromParentNode];
     if (_musicActive)
         [[GibsonMusic shared] viewDidStop];
     gibson_log(@"dealloc");
@@ -154,10 +162,124 @@ static const CGFloat kMusicMinWidth = 400;
         [[GibsonMusic shared] viewDidStop];
 }
 
+/* The display this view covers, or nil if it can't be told. The view lives in
+ * a remote-view window whose -screen is nil on secondary displays, but the
+ * window's origin is the display's origin in top-left-origin global
+ * coordinates (seen on macOS 27.2), so match that against the screen frames.
+ * A unique size match is the fallback. */
+- (NSScreen *)hostScreen
+{
+    NSArray<NSScreen *> *screens = [NSScreen screens];
+    const NSSize size = self.bounds.size;
+    if (!self.window || screens.count == 0 || size.width < 1 || size.height < 1)
+        return nil;
+
+    const NSPoint o = self.window.frame.origin;
+    const CGFloat mainH = screens[0].frame.size.height;
+    const NSRect flipped = NSMakeRect(o.x, mainH - o.y - size.height, size.width, size.height);
+    const NSRect plain = NSMakeRect(o.x, o.y, size.width, size.height);
+    auto near = [](NSRect a, NSRect b) {
+        return fabs(a.origin.x - b.origin.x) < 1.5 && fabs(a.origin.y - b.origin.y) < 1.5
+            && fabs(a.size.width - b.size.width) < 1.5 && fabs(a.size.height - b.size.height) < 1.5;
+    };
+    for (NSScreen *s in screens)
+        if (near(s.frame, flipped))
+            return s;
+    for (NSScreen *s in screens)
+        if (near(s.frame, plain))
+            return s;
+
+    NSScreen *bySize = nil;
+    for (NSScreen *s in screens)
+    {
+        if (fabs(s.frame.size.width - size.width) >= 1.5
+            || fabs(s.frame.size.height - size.height) >= 1.5)
+            continue;
+        if (bySize)
+            return nil;   // two displays this size: ambiguous
+        bySize = s;
+    }
+    return bySize;
+}
+
+/* With several displays, render this display's slice of one shared frustum
+ * (GibsonWall.h). An unidentified view keeps whatever it had: the host
+ * passes through transient sizes while attaching. */
+- (void)updateProjection
+{
+    if (!_scnView || self.isPreview)
+        return;
+    GibsonSCNScene *world = [GibsonSCNScene sharedWorldForPreview:NO mediaURL:[self mediaURL]];
+    if ([NSScreen screens].count < 2 || !gibson_span_displays())
+    {
+        _scnView.pointOfView = world.cameraNode;
+        return;
+    }
+    NSScreen *screen = [self hostScreen];
+    SCNMatrix4 projection;
+    simd_quatf orientation;
+    if (!screen || ![GibsonSCNScene wallProjection:&projection
+                                       orientation:&orientation
+                                         forScreen:screen])
+        return;
+    if (!_viewCam)
+        _viewCam = [world makeViewCameraNode];
+    _viewCam.camera.projectionTransform = projection;
+    _viewCam.simdOrientation = orientation;
+    if (_scnView.pointOfView != _viewCam)
+    {
+        _scnView.pointOfView = _viewCam;
+        gibson_log([NSString stringWithFormat:@"spanning: view %.0fx%.0f is %@",
+                    self.bounds.size.width, self.bounds.size.height, screen.localizedName]);
+    }
+}
+
+- (void)screensChanged:(NSNotification *)note
+{
+    [self updateProjection];
+}
+
+/* Multi-monitor diagnostic: which process hosts this view, and can the view
+ * tell which display it is on? Read with
+ *   log show --last 10m --predicate 'subsystem == "org.hackthegibson.TheGibson"' | grep diag */
+- (void)logDisplayDiagnostics:(NSString *)reason
+{
+    NSWindow *win = self.window;
+    NSScreen *ws = win.screen;
+    const NSRect onScreen = win ? [win convertRectToScreen:[self convertRect:self.bounds toView:nil]]
+                                : NSZeroRect;
+    gibson_log([NSString stringWithFormat:
+        @"diag (%@) pid=%d view=%p bounds=%@ window=%@ winFrame=%@ viewOnScreen=%@ "
+        @"winScreen=%@ id=%@ frame=%@",
+        reason, getpid(), self, NSStringFromSize(self.bounds.size),
+        win ? NSStringFromClass([win class]) : @"(none)",
+        NSStringFromRect(win.frame), NSStringFromRect(onScreen),
+        ws ? ws.localizedName : @"(none)",
+        ws.deviceDescription[@"NSScreenNumber"] ?: @"-",
+        NSStringFromRect(ws.frame)]);
+
+    NSArray<NSScreen *> *screens = [NSScreen screens];
+    for (NSUInteger i = 0; i < screens.count; i++)
+    {
+        NSScreen *s = screens[i];
+        NSNumber *num = s.deviceDescription[@"NSScreenNumber"];
+        const CGSize mm = CGDisplayScreenSize((CGDirectDisplayID)num.unsignedIntValue);
+        gibson_log([NSString stringWithFormat:
+            @"diag (%@) pid=%d screen[%lu/%lu] %@ id=%@ frame=%@ scale=%.1f mm=%.0fx%.0f",
+            reason, getpid(), (unsigned long)i, (unsigned long)screens.count,
+            s.localizedName, num ?: @"-", NSStringFromRect(s.frame),
+            s.backingScaleFactor, mm.width, mm.height]);
+    }
+}
+
 - (void)setFrameSize:(NSSize)newSize
 {
+    const NSSize old = self.frame.size;
     [super setFrameSize:newSize];
     [self updateMusic];   // the host sizes the view after attaching it
+    [self updateProjection];
+    if (_sessionActive && !NSEqualSizes(old, newSize))
+        [self logDisplayDiagnostics:@"resize"];
 }
 
 /* Idempotent: called from -viewDidMoveToWindow, -startAnimation and didstart,
@@ -174,7 +296,9 @@ static const CGFloat kMusicMinWidth = 400;
                 reason, gibson_fly_speed(), gibson_bank_strength(),
                 gibson_settings_path()[0] ? gibson_settings_path() : "(default)"]);
 
+    [self logDisplayDiagnostics:reason];
     [self attachSceneIfNeeded];
+    [self updateProjection];
     [[GibsonSCNScene sharedWorldForPreview:self.isPreview mediaURL:[self mediaURL]] resetClock];
     [self setPlaying:YES];
     [self updateMusic];
