@@ -5,7 +5,9 @@
 #import <QuartzCore/QuartzCore.h>
 #import <SceneKit/SceneKit.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <cstring>
 #include <os/log.h>
 #include <unistd.h>
 
@@ -36,10 +38,11 @@ static NSString *const kSaverDidStart = @"com.apple.screensaver.didstart";
 static NSString *const kSaverWillStop = @"com.apple.screensaver.willstop";
 static NSString *const kSaverDidStop = @"com.apple.screensaver.didstop";
 
-/* An SCNView whose layer keeps a chosen contentsScale and a drawable that
- * matches it. AppKit resets the layer's scale whenever the view changes window
- * or display, and SceneKit only resizes its drawable when the view's size
- * changes, so neither can be set once at creation. */
+/* An SCNView whose layer keeps a chosen contentsScale (the display's backing
+ * scale): inside the shrunken bounds of GibsonSaverView, AppKit would raise it
+ * to keep the view sharp, undoing the smaller render size. SceneKit sizes the
+ * drawable from the scale itself; setting the drawable directly from here
+ * raced its render thread. */
 @interface GibsonRenderView : SCNView
 @property(nonatomic) CGFloat renderScale;
 @end
@@ -53,15 +56,6 @@ static NSString *const kSaverDidStop = @"com.apple.screensaver.didstop";
         return;
     if (layer.contentsScale != _renderScale)
         layer.contentsScale = _renderScale;
-    /* SceneKit only resizes its drawable when the view's size changes. */
-    if ([layer isKindOfClass:[CAMetalLayer class]])
-    {
-        const CGSize want = CGSizeMake(std::round(self.bounds.size.width * _renderScale),
-                                       std::round(self.bounds.size.height * _renderScale));
-        CAMetalLayer *metal = (CAMetalLayer *)layer;
-        if (want.width >= 1 && want.height >= 1 && !CGSizeEqualToSize(metal.drawableSize, want))
-            metal.drawableSize = want;
-    }
 }
 
 - (void)setFrameSize:(NSSize)size
@@ -96,9 +90,57 @@ static NSString *const kSaverDidStop = @"com.apple.screensaver.didstop";
 
 @end
 
+/* Sits between an SCNView and the shared world as its delegate, counting the
+ * frames that view actually draws, for the heartbeat log. */
+@interface GibsonFrameCounter : NSObject <SCNSceneRendererDelegate>
+- (instancetype)initWithTarget:(id<SCNSceneRendererDelegate>)target;
+- (unsigned long long)frames;
+@end
+
+@implementation GibsonFrameCounter
+{
+    __weak id<SCNSceneRendererDelegate> _target;
+    std::atomic<unsigned long long> _frames;
+}
+
+- (instancetype)initWithTarget:(id<SCNSceneRendererDelegate>)target
+{
+    self = [super init];
+    if (self)
+        _target = target;
+    return self;
+}
+
+- (unsigned long long)frames
+{
+    return _frames.load();
+}
+
+- (void)renderer:(id<SCNSceneRenderer>)renderer updateAtTime:(NSTimeInterval)time
+{
+    id<SCNSceneRendererDelegate> t = _target;
+    if ([t respondsToSelector:_cmd])
+        [t renderer:renderer updateAtTime:time];
+}
+
+- (void)renderer:(id<SCNSceneRenderer>)renderer didRenderScene:(SCNScene *)scene atTime:(NSTimeInterval)time
+{
+    ++_frames;
+    id<SCNSceneRendererDelegate> t = _target;
+    if ([t respondsToSelector:_cmd])
+        [t renderer:renderer didRenderScene:scene atTime:time];
+}
+
+@end
+
 @implementation GibsonSaverView
 {
     GibsonRenderView *_scnView;
+    GibsonFrameCounter *_frameCounter;   // the SCNView's delegate (it holds it weakly)
+    NSTimer *_heartbeat;
+    unsigned long long _lastFrames;
+    NSTimer *_watchdog;
+    unsigned long long _watchdogFrames;
     SCNNode *_viewCam;   // this display's slice of the shared view, once known
     BOOL _sessionActive;
     BOOL _musicActive;
@@ -170,6 +212,8 @@ static const CGFloat kMusicMinWidth = 400;
 {
     [[NSDistributedNotificationCenter defaultCenter] removeObserver:self];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [_heartbeat invalidate];
+    [_watchdog invalidate];
     [_viewCam removeFromParentNode];
     if (_musicActive)
         [[GibsonMusic shared] viewDidStop];
@@ -197,6 +241,8 @@ static const CGFloat kMusicMinWidth = 400;
     _scnView.wantsLayer = YES;
     _scnView.layer.opaque = YES;
     [GibsonSCNScene configureView:_scnView preview:self.isPreview mediaURL:media];
+    _frameCounter = [[GibsonFrameCounter alloc] initWithTarget:_scnView.delegate];
+    _scnView.delegate = _frameCounter;
     _scnView.preferredFramesPerSecond = self.isPreview ? 30 : 60;
     _scnView.antialiasingMode = SCNAntialiasingModeNone;
     _scnView.playing = NO;
@@ -292,6 +338,7 @@ static const CGFloat kMusicMinWidth = 400;
 {
     if (!_scnView || self.isPreview)
         return;
+    [self fixWindowScreen];
     GibsonSCNScene *world = [GibsonSCNScene sharedWorldForPreview:NO mediaURL:[self mediaURL]];
     if ([NSScreen screens].count < 2 || !gibson_span_displays())
     {
@@ -366,6 +413,88 @@ static const CGFloat kMusicMinWidth = 400;
         [self logDisplayDiagnostics:@"resize"];
 }
 
+/* SCNView draws from a display link that follows its window's screen. The
+ * host's remote windows report frames in flipped coordinates (see
+ * -hostScreen), and when that puts the window on no display at all, as for a
+ * display above the main one, SCNView never draws and the display stays
+ * black. The window here is only the service side's stand-in (the host
+ * composites what it shows), so move it onto the display it really covers. */
+- (void)fixWindowScreen
+{
+    NSWindow *win = self.window;
+    if (!win || win.screen)
+        return;
+    NSScreen *screen = [self hostScreen];
+    if (!screen)
+        return;
+    gibson_log([NSString stringWithFormat:@"view %@ has a window on no display (%@); moving it to %@",
+                NSStringFromSize(self.frame.size), NSStringFromRect(win.frame), screen.localizedName]);
+    [win setFrameOrigin:screen.frame.origin];
+}
+
+/* Backstop: if a playing view draws nothing for a second, try that again. */
+- (void)startWatchdog
+{
+    [_watchdog invalidate];
+    _watchdogFrames = _frameCounter.frames;
+    __weak GibsonSaverView *weakSelf = self;
+    _watchdog = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) {
+        GibsonSaverView *me = weakSelf;
+        if (!me || !me->_sessionActive)
+        {
+            [t invalidate];
+            return;
+        }
+        const unsigned long long frames = me->_frameCounter.frames;
+        if (frames == me->_watchdogFrames && me->_scnView.isPlaying)
+            [me fixWindowScreen];
+        me->_watchdogFrames = frames;
+    }];
+}
+
+- (void)stopWatchdog
+{
+    [_watchdog invalidate];
+    _watchdog = nil;
+}
+
+/* Every 15 s while running: is this display's view actually drawing, and
+ * with what? For chasing a display that stays black. */
+- (void)startHeartbeat
+{
+    [_heartbeat invalidate];
+    _lastFrames = _frameCounter.frames;
+    __weak GibsonSaverView *weakSelf = self;
+    _heartbeat = [NSTimer scheduledTimerWithTimeInterval:15.0 repeats:YES block:^(NSTimer *t) {
+        GibsonSaverView *me = weakSelf;
+        if (!me)
+        {
+            [t invalidate];
+            return;
+        }
+        [me logHeartbeat];
+    }];
+}
+
+- (void)logHeartbeat
+{
+    const unsigned long long frames = _frameCounter.frames;
+    const double fps = (frames - _lastFrames) / 15.0;
+    _lastFrames = frames;
+    CALayer *layer = _scnView.layer;
+    const CGSize px = [layer isKindOfClass:[CAMetalLayer class]] ? ((CAMetalLayer *)layer).drawableSize
+                                                                  : CGSizeZero;
+    SCNNode *pov = _scnView.pointOfView;
+    gibson_log([NSString stringWithFormat:
+        @"heartbeat %@: %.1f fps, playing=%d pov=%@ hidden=%d scn=%@ bounds=%@ layer=%@ "
+        @"drawable=%.0fx%.0f scale=%.2f occl=%lu win=%@ superlayer=%@",
+        NSStringFromSize(self.frame.size), fps, _scnView.isPlaying, pov.name ?: @"(none)",
+        _scnView.isHiddenOrHasHiddenAncestor, NSStringFromRect(_scnView.frame),
+        NSStringFromSize(self.bounds.size), NSStringFromRect(layer.frame), px.width, px.height,
+        layer.contentsScale, (unsigned long)self.window.occlusionState,
+        NSStringFromRect(self.window.frame), NSStringFromRect(layer.superlayer.bounds)]);
+}
+
 /* What the GPU really renders, once the host has settled the view's size. */
 - (void)logDrawableSoon
 {
@@ -404,6 +533,8 @@ static const CGFloat kMusicMinWidth = 400;
     [self applyRenderSize];
     [self updateProjection];
     [self logDrawableSoon];
+    [self startHeartbeat];
+    [self startWatchdog];
     [[GibsonSCNScene sharedWorldForPreview:self.isPreview mediaURL:[self mediaURL]] resetClock];
     [self setPlaying:YES];
     [self updateMusic];
@@ -414,6 +545,9 @@ static const CGFloat kMusicMinWidth = 400;
     if (!_sessionActive)
         return;
     _sessionActive = NO;
+    [_heartbeat invalidate];
+    _heartbeat = nil;
+    [self stopWatchdog];
     [self setPlaying:NO];
     [self updateMusic];
     gibson_log([NSString stringWithFormat:@"end (%@)", reason]);

@@ -73,6 +73,7 @@ int main(int argc, char **argv)
     {
         double seconds = 20, warmup = 5, bloom = -1, mblur = -1, hdr = -1, towerFraction = 1;
         double windowScale = 1;
+        bool offscreen = false;
         bool noMirror = false, noPulses = false, noFloor = false;
         for (int i = 1; i < argc; ++i)
         {
@@ -90,6 +91,8 @@ int main(int argc, char **argv)
                 towerFraction = std::atof(argv[++i]);   // keep this fraction of towers
             else if (std::strcmp(argv[i], "--window-scale") == 0 && i + 1 < argc)
                 windowScale = std::atof(argv[++i]);   // experiment: smaller windows
+            else if (std::strcmp(argv[i], "--offscreen") == 0)
+                offscreen = true;   // windows on no display, like the host's remote windows
             else if (std::strcmp(argv[i], "--no-mirror") == 0)
                 noMirror = true;
             else if (std::strcmp(argv[i], "--no-pulses") == 0)
@@ -123,6 +126,8 @@ int main(int argc, char **argv)
             NSRect frame = screen.frame;
             frame.size.width = std::round(frame.size.width * windowScale);
             frame.size.height = std::round(frame.size.height * windowScale);
+            if (offscreen)
+                frame.origin.y = -6000 - frame.size.height;
             [w setFrame:frame display:NO];
             GibsonSaverView *view = [[GibsonSaverView alloc] initWithFrame:NSMakeRect(0, 0,
                                                                                      frame.size.width,
