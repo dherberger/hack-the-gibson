@@ -49,24 +49,24 @@ static SCNVector3 gibson_spline_at(float dt)
     return p;
 }
 
+/* The authored path is a closed loop: its last two waypoints repeat the first.
+ * Fly it round and round over the unique ones. (It used to ping-pong, which
+ * turned the camera around end to end every pass: the look-at point reversed
+ * before the camera did.) */
+static const int kLoopPoints = GIBSON_FLY_PATH_COUNT - 2;
+
+/* Rooftop swoop: where on the path (in waypoint units) the climb tops out
+ * over the city. */
+static const float kSwoopTopDt = 16.5f;
+
 static SCNVector3 gibson_spline_at_raw(float dt)
 {
-    const int pSize = GIBSON_FLY_PATH_COUNT;
-    const int unwrappedIdx = (int)std::floor(dt);
-    const int span = pSize - 1;
-    const bool pingPong = true;
-    const bool pong = pingPong && span > 0 && ((unwrappedIdx / span) % 2) != 0;
-    float u = dt - std::floor(dt);
-    if (pong)
-        u = 1.f - u;
-
-    int idx;
-    if (pong)
-        idx = (span - 1) - (unwrappedIdx % span);
-    else if (pingPong)
-        idx = unwrappedIdx % span;
-    else
-        idx = unwrappedIdx % pSize;
+    const int pSize = kLoopPoints;
+    const float fl = std::floor(dt);
+    int idx = (int)fl % pSize;
+    if (idx < 0)
+        idx += pSize;
+    const float u = dt - fl;
 
     const int i0 = gibson_clamp_wrap(idx - 1, pSize);
     const int i1 = gibson_clamp_wrap(idx + 0, pSize);
@@ -101,6 +101,19 @@ static SCNVector3 gibson_spline_at_raw(float dt)
         p1.x * h1 + p2.x * h2 + t1.x * h3 + t2.x * h4,
         p1.y * h1 + p2.y * h2 + t1.y * h3 + t2.y * h4,
         p1.z * h1 + p2.z * h2 + t1.z * h3 + t2.z * h4);
+}
+
+/* Where on the path the flight starts, so the rooftop swoop lands at
+ * `swoop_at` seconds into the session (default 33 s, a cue in the Hackers
+ * suite; the music starts with the session). `swoop_at = off` starts at the
+ * first waypoint, as the original did. */
+static float gibson_path_offset(float speed)
+{
+    NSString *v = [NSString stringWithUTF8String:gibson_settings_raw("swoop_at")].lowercaseString;
+    if ([v isEqualToString:@"off"] || [v isEqualToString:@"no"] || [v isEqualToString:@"none"])
+        return 0.f;
+    const double at = v.length ? v.doubleValue : 33.0;
+    return kSwoopTopDt - (float)(std::max(0.0, at) * speed);
 }
 
 static simd_float3 gibson_v(SCNVector3 p)
@@ -188,8 +201,9 @@ static simd_float3 gibson_safe_norm(simd_float3 v, simd_float3 fallback)
         : std::max(1.f / 120.f, std::min(0.1f, (elapsedMs - _lastElapsedMs) * 0.001f));
     _lastElapsedMs = elapsedMs;
 
-    const float lookDt = std::max(0.f, elapsedMs) * speed * 0.001f;
-    const float camDt = std::max(0.f, elapsedMs - (float)GIBSON_FLY_LOOKAHEAD_MS) * speed * 0.001f;
+    const float offset = gibson_path_offset(speed);
+    const float lookDt = std::max(0.f, elapsedMs) * speed * 0.001f + offset;
+    const float camDt = std::max(0.f, elapsedMs - (float)GIBSON_FLY_LOOKAHEAD_MS) * speed * 0.001f + offset;
     const SCNVector3 lookPos = gibson_spline_at(lookDt);
     const SCNVector3 camPos = gibson_spline_at(camDt);
     _lookAtNode.position = lookPos;
@@ -241,13 +255,14 @@ static simd_float3 gibson_safe_norm(simd_float3 v, simd_float3 fallback)
 + (NSTimeInterval)loopDuration
 {
     const float speed = std::max(0.01f, gibson_fly_speed());
-    return 2.0 * (GIBSON_FLY_PATH_COUNT - 1) / speed;
+    return kLoopPoints / speed;
 }
 
 + (NSArray<NSDictionary *> *)flightMoments
 {
     const float speed = std::max(0.01f, gibson_fly_speed());
     const double loop = [self loopDuration];
+    const float offset = gibson_path_offset(speed);
     const double step = 0.25;
     const int n = (int)(loop / step);
     const float eps = 0.14f;
@@ -258,7 +273,7 @@ static simd_float3 gibson_safe_norm(simd_float3 v, simd_float3 fallback)
     float maxTurn = 0.f;
     for (int i = 0; i < n; ++i)
     {
-        const float dt = (float)(i * step) * speed;
+        const float dt = (float)(i * step) * speed + offset;
         const simd_float3 a = gibson_safe_norm(
             gibson_v(gibson_spline_at(dt)) - gibson_v(gibson_spline_at(dt - eps)), simd_make_float3(0, 0, 1));
         const simd_float3 b = gibson_safe_norm(
@@ -268,7 +283,7 @@ static simd_float3 gibson_safe_norm(simd_float3 v, simd_float3 fallback)
     }
     for (int i = 0; i < n; ++i)
     {
-        const float y = (float)gibson_spline_at((float)(i * step) * speed).y;
+        const float y = (float)gibson_spline_at((float)(i * step) * speed + offset).y;
         if (y > 30.f)
             kind[i] = 3;
         else if (std::fabs(turn[i]) > maxTurn * 0.35f)

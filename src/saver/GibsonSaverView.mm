@@ -144,6 +144,25 @@ static NSString *const kSaverDidStop = @"com.apple.screensaver.didstop";
     SCNNode *_viewCam;   // this display's slice of the shared view, once known
     BOOL _sessionActive;
     BOOL _musicActive;
+    NSTextField *_timerLabel;   // `show_timer = yes`: elapsed time, bottom right
+    NSTimer *_timerTick;
+}
+
+/* One clock for the whole process, so every display's timer reads the same:
+ * it starts when the first display's session begins. */
+static CFTimeInterval s_sessionStart;
+static int s_sessionsActive;
+
+static double gibson_session_elapsed(void)
+{
+    return s_sessionsActive > 0 ? CACurrentMediaTime() - s_sessionStart : 0.0;
+}
+
+static BOOL gibson_show_timer(void)
+{
+    NSString *v = [NSString stringWithUTF8String:gibson_settings_raw("show_timer")].lowercaseString;
+    return [v isEqualToString:@"yes"] || [v isEqualToString:@"true"] || [v isEqualToString:@"on"] ||
+           [v isEqualToString:@"1"];
 }
 
 /* Music only for a real full-screen session: System Settings' thumbnail
@@ -214,6 +233,9 @@ static const CGFloat kMusicMinWidth = 400;
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [_heartbeat invalidate];
     [_watchdog invalidate];
+    [_timerTick invalidate];
+    if (_sessionActive && s_sessionsActive > 0)
+        --s_sessionsActive;
     [_viewCam removeFromParentNode];
     if (_musicActive)
         [[GibsonMusic shared] viewDidStop];
@@ -270,6 +292,7 @@ static const CGFloat kMusicMinWidth = 400;
         [self setBoundsSize:b];
     _scnView.frame = self.bounds;
     _scnView.renderScale = backing;
+    [self layoutTimerLabel];
 }
 
 - (void)setPlaying:(BOOL)playing
@@ -486,9 +509,9 @@ static const CGFloat kMusicMinWidth = 400;
                                                                   : CGSizeZero;
     SCNNode *pov = _scnView.pointOfView;
     gibson_log([NSString stringWithFormat:
-        @"heartbeat %@: %.1f fps, playing=%d pov=%@ hidden=%d scn=%@ bounds=%@ layer=%@ "
+        @"heartbeat t=%.1f %@: %.1f fps, playing=%d pov=%@ hidden=%d scn=%@ bounds=%@ layer=%@ "
         @"drawable=%.0fx%.0f scale=%.2f occl=%lu win=%@ superlayer=%@",
-        NSStringFromSize(self.frame.size), fps, _scnView.isPlaying, pov.name ?: @"(none)",
+        gibson_session_elapsed(), NSStringFromSize(self.frame.size), fps, _scnView.isPlaying, pov.name ?: @"(none)",
         _scnView.isHiddenOrHasHiddenAncestor, NSStringFromRect(_scnView.frame),
         NSStringFromSize(self.bounds.size), NSStringFromRect(layer.frame), px.width, px.height,
         layer.contentsScale, (unsigned long)self.window.occlusionState,
@@ -514,6 +537,66 @@ static const CGFloat kMusicMinWidth = 400;
     });
 }
 
+- (void)startTimerOverlay
+{
+    if (!gibson_show_timer() || self.isPreview)
+        return;
+    if (!_timerLabel)
+    {
+        _timerLabel = [NSTextField labelWithString:@"00:00.0"];
+        _timerLabel.textColor = [NSColor colorWithWhite:1 alpha:0.75];
+        _timerLabel.drawsBackground = YES;
+        _timerLabel.backgroundColor = [NSColor colorWithWhite:0 alpha:0.45];
+        _timerLabel.alignment = NSTextAlignmentRight;
+    }
+    if (_timerLabel.superview != self)
+        [self addSubview:_timerLabel positioned:NSWindowAbove relativeTo:_scnView];
+    [self layoutTimerLabel];
+
+    [_timerTick invalidate];
+    __weak GibsonSaverView *weakSelf = self;
+    _timerTick = [NSTimer timerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *t) {
+        GibsonSaverView *me = weakSelf;
+        if (!me || !me->_sessionActive)
+        {
+            [t invalidate];
+            return;
+        }
+        const double e = gibson_session_elapsed();
+        const int m = (int)(e / 60);
+        me->_timerLabel.stringValue = [NSString stringWithFormat:@"%02d:%04.1f", m, e - m * 60];
+    }];
+    [[NSRunLoop mainRunLoop] addTimer:_timerTick forMode:NSRunLoopCommonModes];
+}
+
+/* The view's bounds are scaled down from its frame to render fewer pixels
+ * (render_scale), and the screensaver host sizes the view only after the
+ * session begins. So place the label in bounds units, scaled to keep it about
+ * 12 pt on screen, every time the size changes. */
+- (void)layoutTimerLabel
+{
+    if (!_timerLabel.superview)
+        return;
+    const NSSize f = self.frame.size;
+    const NSSize b = self.bounds.size;
+    if (f.width < 1 || b.width < 1)
+        return;
+    const CGFloat k = b.width / f.width;   // bounds units per screen point
+    _timerLabel.font = [NSFont monospacedDigitSystemFontOfSize:12 * k weight:NSFontWeightMedium];
+    [_timerLabel sizeToFit];
+    NSRect r = _timerLabel.frame;
+    r.size.width = std::ceil(r.size.width + 6 * k);
+    r.origin = NSMakePoint(NSMaxX(self.bounds) - r.size.width - 10 * k, NSMinY(self.bounds) + 10 * k);
+    _timerLabel.frame = r;
+}
+
+- (void)stopTimerOverlay
+{
+    [_timerTick invalidate];
+    _timerTick = nil;
+    [_timerLabel removeFromSuperview];
+}
+
 /* Idempotent: called from -viewDidMoveToWindow, -startAnimation and didstart,
  * whichever the host happens to deliver. */
 - (void)beginSession:(NSString *)reason
@@ -521,6 +604,8 @@ static const CGFloat kMusicMinWidth = 400;
     if (_sessionActive || !self.window)
         return;
     _sessionActive = YES;
+    if (s_sessionsActive++ == 0)
+        s_sessionStart = CACurrentMediaTime();
 
     NSString *res = [[NSBundle bundleForClass:[self class]] resourcePath];
     gibson_settings_reload(res.fileSystemRepresentation);
@@ -538,6 +623,7 @@ static const CGFloat kMusicMinWidth = 400;
     [[GibsonSCNScene sharedWorldForPreview:self.isPreview mediaURL:[self mediaURL]] resetClock];
     [self setPlaying:YES];
     [self updateMusic];
+    [self startTimerOverlay];
 }
 
 - (void)endSession:(NSString *)reason
@@ -545,12 +631,16 @@ static const CGFloat kMusicMinWidth = 400;
     if (!_sessionActive)
         return;
     _sessionActive = NO;
+    if (s_sessionsActive > 0)
+        --s_sessionsActive;
+    [self stopTimerOverlay];
     [_heartbeat invalidate];
     _heartbeat = nil;
     [self stopWatchdog];
     [self setPlaying:NO];
     [self updateMusic];
-    gibson_log([NSString stringWithFormat:@"end (%@)", reason]);
+    gibson_log([NSString stringWithFormat:@"end (%@) at t=%.1f", reason,
+                CACurrentMediaTime() - s_sessionStart]);
 }
 
 - (void)viewDidMoveToWindow
