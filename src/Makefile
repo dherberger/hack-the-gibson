@@ -20,7 +20,8 @@ SAVER_MM = saver/GibsonSaverView.mm saver/GibsonMusic.mm
 APPEX_MM = \
 	saver/GibsonScreenSaverExtension.mm \
 	saver/GibsonScreenSaverViewController.mm
-HOST_MM = app/GibsonApp.mm app/GibsonArrange.mm app/GibsonLidAngle.mm
+HOST_MM = app/GibsonApp.mm app/GibsonArrange.mm app/GibsonLidAngle.mm \
+	app/GibsonGame.mm app/GibsonGarbage.mm
 SCN_MM = \
 	scenekit/GibsonSCNScene.mm \
 	scenekit/GibsonSCNCamera.mm \
@@ -35,7 +36,7 @@ PREVIEW_OBJ = $(PREVIEW_MM:.mm=.o)
 PREVIEW = scn_preview
 BENCH = gibson_bench
 
-SCN_INCLUDES = -I. -Iscenekit -Isaver
+SCN_INCLUDES = -I. -Iscenekit -Isaver -Iapp
 SCN_FRAMEWORKS = SceneKit ModelIO QuartzCore Metal Cocoa Foundation AppKit CoreGraphics
 SAVER_SCN_LIBS = \
 	-Wl,-ObjC \
@@ -75,7 +76,7 @@ else
 endif
 
 .PHONY: all clean saver install-saver uninstall-saver enable-saver scn \
-	legacy-saver notarize run-app bench
+	legacy-saver notarize run-app bench play
 
 all: saver
 	@echo "It's time to hack the gibson."
@@ -92,8 +93,8 @@ saver/%.o: saver/%.mm
 app/%.o: app/%.mm
 	$(CXX) $(CXXFLAGS) -fobjc-arc -mmacosx-version-min=$(SAVER_MIN_OS) $(SCN_INCLUDES) -c $< -o $@
 
-$(PREVIEW): $(SCN_OBJS) $(PREVIEW_OBJ)
-	$(CXX) $(CXXFLAGS) -fobjc-arc $(SCN_INCLUDES) -o $(PREVIEW) $(SCN_OBJS) $(PREVIEW_OBJ) $(PREVIEW_LIBS)
+$(PREVIEW): $(SCN_OBJS) $(PREVIEW_OBJ) app/GibsonGarbage.o
+	$(CXX) $(CXXFLAGS) -fobjc-arc $(SCN_INCLUDES) -o $(PREVIEW) $(SCN_OBJS) $(PREVIEW_OBJ) app/GibsonGarbage.o $(PREVIEW_LIBS)
 
 scn: $(PREVIEW)
 	./$(PREVIEW)
@@ -127,18 +128,21 @@ $(APPEX_BIN): $(SCN_OBJS) $(SAVER_OBJS) $(APPEX_OBJS) saver/TheGibson.appex.plis
 		"$(APPEX_DIR)"
 	@echo "Built $(APPEX_DIR) (signed with $(CODESIGN_IDENTITY))"
 
-$(APP_BIN): $(APPEX_BIN) $(SCN_OBJS) $(HOST_OBJ) app/Info.plist
+$(APP_BIN): $(APPEX_BIN) $(SCN_OBJS) $(HOST_OBJ) saver/GibsonMusic.o app/Info.plist
 	mkdir -p "$(APP_DIR)/Contents/MacOS" "$(APP_DIR)/Contents/Resources" "$(APP_DIR)/Contents/PlugIns"
 	cp app/Info.plist "$(APP_DIR)/Contents/Info.plist"
 	printf 'APPL????' > "$(APP_DIR)/Contents/PkgInfo"
 	$(CXX) $(CXXFLAGS) -fobjc-arc -mmacosx-version-min=$(SAVER_MIN_OS) \
-		-o "$(APP_BIN)" $(SCN_OBJS) $(HOST_OBJ) $(HOST_LIBS)
+		-o "$(APP_BIN)" $(SCN_OBJS) $(HOST_OBJ) saver/GibsonMusic.o $(HOST_LIBS)
 	codesign --force --sign "$(CODESIGN_IDENTITY)" $(CODESIGN_OPTS) "$(APP_DIR)"
 	@echo "Built $(APP_DIR) (signed with $(CODESIGN_IDENTITY))"
 	@echo "Install with: make install-saver"
 
 run-app: saver
 	open "$(APP_DIR)"
+
+play: saver
+	open "$(APP_DIR)" --args --game
 
 install-saver: saver
 	@if [ -d "$(INSTALL_APP)" ]; then rm -rf "$(INSTALL_APP)"; fi

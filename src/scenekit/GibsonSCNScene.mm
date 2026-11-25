@@ -575,6 +575,22 @@ static NSImage *gibson_trace_mask_image(NSImage *src)
     ++_renderedFrames;   // render-thread only; a torn read in the bench is harmless
 }
 
+- (SCNNode *)towerNodeAtX:(float)x z:(float)z
+{
+    for (SCNNode *group in _worldRoot.childNodes)
+    {
+        if ([group.name isEqualToString:@"tower-mirror"])
+            continue;
+        for (SCNNode *tower in group.childNodes)
+        {
+            const SCNVector3 p = tower.position;
+            if (tower.geometry && std::fabs(p.x - x) < 1.f && std::fabs(p.z - z) < 1.f)
+                return tower;
+        }
+    }
+    return nil;
+}
+
 - (void)resetClock
 {
     _started = NO;
@@ -612,7 +628,9 @@ static NSImage *gibson_trace_mask_image(NSImage *src)
     const float delta = (float)std::min(0.1, std::max(0.0, (double)(time - _lastTime)));
     _lastTime = time;
 
-    [_flyCam updateAtTime:time startTime:_startTime];
+    id<GibsonCameraDriver> driver = _cameraDriver;
+    if (!driver || ![driver driveCamera:_flyCam.cameraNode atTime:time delta:delta])
+        [_flyCam updateAtTime:time startTime:_startTime];
     [self updateTowersAtTime:time];
     [self updatePulses:delta];
 }

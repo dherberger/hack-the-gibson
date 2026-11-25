@@ -1,4 +1,5 @@
 #import "GibsonSCNScene.h"
+#import "GibsonGarbage.h"
 
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
@@ -8,6 +9,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
+#include <unistd.h>
+#import <simd/simd.h>
 
 static NSURL *gibson_find_media(const char *argv0)
 {
@@ -156,6 +160,83 @@ static int gibson_write_wall(NSURL *media, const char *dir, double atTime)
 
 /* Step simulated time at 60 Hz from t=0 and write a PNG every `interval` s,
  * for frame-by-frame comparison with reference footage. */
+/* Development: the game's garbage-file column on a tower, camera squared up
+ * as the game leaves it, rendered at a few moments of the sequence. */
+@interface GibsonFixedCamera : NSObject <GibsonCameraDriver>
+@property (nonatomic) simd_float3 pos;
+@property (nonatomic) float yaw;
+@property (nonatomic, strong) GibsonGarbageColumn *column;
+@end
+@implementation GibsonFixedCamera
+- (BOOL)driveCamera:(SCNNode *)camera atTime:(NSTimeInterval)time delta:(float)delta
+{
+    const simd_float3 f = simd_make_float3(std::sin(_yaw), 0, std::cos(_yaw));
+    const simd_float3 z = -f;
+    const simd_float3 x = simd_normalize(simd_cross(simd_make_float3(0, 1, 0), z));
+    const simd_float3 y = simd_cross(z, x);
+    camera.simdPosition = _pos;
+    camera.simdOrientation = simd_quaternion(simd_matrix(x, y, z));
+    [_column updateAtTime:time];
+    return YES;
+}
+@end
+
+static int gibson_write_garbage(NSURL *media, const char *dir)
+{
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    [[NSFileManager defaultManager] createDirectoryAtPath:[NSString stringWithUTF8String:dir]
+                              withIntermediateDirectories:YES attributes:nil error:nil];
+    GibsonSCNScene *world = [GibsonSCNScene sharedWorldForPreview:NO mediaURL:media];
+    SCNRenderer *renderer = [SCNRenderer rendererWithDevice:device options:nil];
+    renderer.scene = world.scene;
+    renderer.pointOfView = world.cameraNode;
+    renderer.autoenablesDefaultLighting = NO;
+    world.cameraNode.camera.motionBlurIntensity = 0.0;
+
+    // Street x = 0, tower to its +x side centred at (15, y, 30).
+    const float width = 13.f;
+    const float h = [GibsonGarbageColumn heightForWidth:width];
+    const float dist = h / (0.85f * 2.f * std::tan(36.f * (float)M_PI / 180.f));
+    const simd_float3 normal = simd_make_float3(-1, 0, 0);
+    const simd_float3 face = simd_make_float3(15.f - 7.3f, 18.f, 30.f);
+    GibsonFixedCamera *driver = [[GibsonFixedCamera alloc] init];
+    driver.pos = face + normal * dist;
+    driver.yaw = (float)M_PI / 2;
+    world.cameraDriver = driver;
+    driver.column = [[GibsonGarbageColumn alloc] initWithParent:world.worldRoot
+                                                         center:face + normal * 0.15f
+                                                         normal:normal
+                                                          width:width
+                                                           time:0];
+    [driver.column darkenFaceWidth:14.7f height:43.5f offsetY:43.5f / 2 - 18.f];
+    [driver.column revealAtTime:0];
+    [world towerNodeAtX:15 z:30].opacity = 0.3;
+    const double shots[] = { 1.0, 6.0, 7.2, 8.0 };
+    const double step = 1.0 / 60.0;
+    double t = 0;
+    for (double shot : shots)
+    {
+        while (t + step <= shot)
+        {
+            t += step;
+            if (std::fabs(t - 1.5) < step / 2)
+                [driver.column stopAtTime:t];
+            [world tickAtTime:t];
+            if (t > 1.5 && t < 1.6)
+                usleep(300000);   // let the frames render off-thread
+        }
+        @autoreleasepool
+        {
+            NSImage *image = [renderer snapshotAtTime:t withSize:NSMakeSize(1440, 900)
+                                     antialiasingMode:SCNAntialiasingModeMultisampling4X];
+            NSBitmapImageRep *rep = [NSBitmapImageRep imageRepWithData:[image TIFFRepresentation]];
+            NSString *out = [NSString stringWithFormat:@"%s/garbage_%.1f.png", dir, shot];
+            [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:out atomically:YES];
+        }
+    }
+    return 0;
+}
+
 static int gibson_write_sequence(NSURL *media, const char *dir, int count, double interval,
                                  NSSize size)
 {
@@ -225,6 +306,8 @@ int main(int argc, char **argv)
             wallDir = argv[++i];
         else if (std::strcmp(argv[i], "--at") == 0 && i + 1 < argc)
             wallTime = std::atof(argv[++i]);
+        else if (std::strcmp(argv[i], "--garbage") == 0 && i + 1 < argc)
+            return gibson_write_garbage(gibson_find_media(argv[0]), argv[++i]);
         else if (std::strcmp(argv[i], "--sequence") == 0 && i + 1 < argc)
             sequenceDir = argv[++i];
         else if (std::strcmp(argv[i], "--count") == 0 && i + 1 < argc)
@@ -239,7 +322,7 @@ int main(int argc, char **argv)
         else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0)
         {
             std::fprintf(stderr,
-                         "Usage: %s [--preview] [--snapshot out.png]\n"
+                         "Usage: %s [--preview] [--snapshot out.png] [--garbage dir]\n"
                          "       %s --sequence DIR [--count 18] [--interval 0.5] [--size 1185 510]\n"
                          "       %s --wall DIR [--at 6.0]   (multi-monitor slices vs. reference)\n",
                          argv[0], argv[0], argv[0]);

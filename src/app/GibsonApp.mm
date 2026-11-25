@@ -1,5 +1,6 @@
 #import "GibsonSCNScene.h"
 #import "GibsonArrange.h"
+#import "GibsonGame.h"
 
 #import <AVFoundation/AVFoundation.h>
 #import <Cocoa/Cocoa.h>
@@ -126,12 +127,14 @@ static double gibson_setting_value(const char *key)
 @interface GibsonAppController : NSObject <NSApplicationDelegate, NSWindowDelegate>
 @property(nonatomic, strong) NSURL *media;
 @property(nonatomic) BOOL openArrange;   // --arrange: go straight to Arrange Displays
+@property(nonatomic) BOOL openGame;      // --game: straight into Hack The Gibson, quit after
 @end
 
 @implementation GibsonAppController
 {
     NSWindow *_settings;
     NSWindow *_preview;
+    GibsonGameController *_game;
     NSButton *_musicEnabled;
     NSTextField *_musicFile;
     NSButton *_chooseButton;
@@ -277,10 +280,11 @@ static NSTextField *gibson_header(NSString *text)
     [grid rowAtIndex:displaysRow].topPadding = 10;
 
     NSButton *preview = [NSButton buttonWithTitle:@"Preview" target:self action:@selector(showPreview:)];
-    preview.keyEquivalent = @"\r";
+    NSButton *play = [NSButton buttonWithTitle:@"Play Hack The Gibson" target:self action:@selector(playGame:)];
+    play.keyEquivalent = @"\r";
     NSButton *folder = [NSButton buttonWithTitle:@"Show Config File" target:self
                                           action:@selector(revealConfig:)];
-    NSStackView *buttons = [NSStackView stackViewWithViews:@[ folder, preview ]];
+    NSStackView *buttons = [NSStackView stackViewWithViews:@[ folder, preview, play ]];
     buttons.spacing = 8;
 
     NSStackView *content = [NSStackView stackViewWithViews:@[ grid, buttons ]];
@@ -493,6 +497,28 @@ static NSTextField *gibson_header(NSString *text)
     [_settings makeKeyAndOrderFront:nil];
 }
 
+- (void)playGame:(id)sender
+{
+    if (_game || !_media)
+        return;
+    [_preview performClose:nil];
+    const BOOL quitAfter = _openGame && !_settings.visible;
+    [_settings orderOut:nil];
+    _game = [[GibsonGameController alloc] initWithMediaURL:_media];
+    __weak GibsonAppController *weakSelf = self;
+    _game.onExit = ^{
+        GibsonAppController *s = weakSelf;
+        if (!s)
+            return;
+        s->_game = nil;
+        if (quitAfter)
+            [NSApp terminate:nil];
+        else
+            [s showSettings:nil];
+    };
+    [_game start];
+}
+
 - (void)showPreview:(id)sender
 {
     if (!_media)
@@ -543,6 +569,7 @@ static NSTextField *gibson_header(NSString *text)
     [appMenu addItem:[NSMenuItem separatorItem]];
     [appMenu addItemWithTitle:@"Settings…" action:@selector(showSettings:) keyEquivalent:@","].target = self;
     [appMenu addItemWithTitle:@"Preview" action:@selector(showPreview:) keyEquivalent:@"p"].target = self;
+    [appMenu addItemWithTitle:@"Play Hack The Gibson" action:@selector(playGame:) keyEquivalent:@"g"].target = self;
     [appMenu addItem:[NSMenuItem separatorItem]];
     [appMenu addItemWithTitle:@"Hide The Gibson" action:@selector(hide:) keyEquivalent:@"h"];
     [appMenu addItem:[NSMenuItem separatorItem]];
@@ -565,6 +592,11 @@ static NSTextField *gibson_header(NSString *text)
 {
     [self buildMenu];
     [self buildSettingsWindow];
+    if (_openGame)
+    {
+        [self playGame:nil];
+        return;
+    }
     [_settings makeKeyAndOrderFront:nil];
     if (_openArrange)
         [self showArrange:nil];
@@ -595,16 +627,19 @@ int main(int argc, char **argv)
 {
     BOOL registerOnly = NO;
     BOOL openArrange = NO;
+    BOOL openGame = NO;
     for (int i = 1; i < argc; ++i)
     {
         if (std::strcmp(argv[i], "--register") == 0)
             registerOnly = YES;
         else if (std::strcmp(argv[i], "--arrange") == 0)
             openArrange = YES;
+        else if (std::strcmp(argv[i], "--game") == 0)
+            openGame = YES;
         else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0)
         {
             std::fprintf(stderr,
-                         "Usage: %s [--register] [--arrange]\n"
+                         "Usage: %s [--register] [--arrange] [--game]\n"
                          "  Host app for The Gibson screensaver: a settings window and a\n"
                          "  flythrough preview. Opening the installed copy in /Applications\n"
                          "  also registers the Screen Saver extension.\n",
@@ -635,6 +670,7 @@ int main(int argc, char **argv)
         GibsonAppController *controller = [[GibsonAppController alloc] init];
         controller.media = media;
         controller.openArrange = openArrange;
+        controller.openGame = openGame;
         NSApp.delegate = controller;
         [NSApp run];
         return 0;

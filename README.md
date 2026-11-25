@@ -108,6 +108,7 @@ To preview from a build without installing:
 
 ```bash
 make run-app       # opens dist/TheGibson.app
+make play          # opens it straight into the game
 make scn           # bare preview window: ./src/scn_preview (Escape or Q to quit)
 ```
 
@@ -160,6 +161,31 @@ cp ~/Downloads/your_track.mp3 ~/Library/Application\ Support/TheGibson/music.mp3
   format macOS can play works, such as MP3, AAC/M4A or WAV. To use a different
   name, set `music = name.m4a`.
 - **No file?** If music is off or the file is missing, it stays silent.
+
+## Play Hack The Gibson
+
+The flythrough is also a small game. Start it from The Gibson app with
+**Play Hack The Gibson** (⌘G), or straight from the command line:
+
+```bash
+make play          # or: open /Applications/TheGibson.app --args --game
+```
+
+It runs full screen on the main display. A small title menu sits in the lower
+right while the flythrough carries on behind it; use ↑ ↓ and Return to choose
+**Start Game**, **Options** or **Exit**. Escape exits at any time.
+
+| Key | What it does |
+|---|---|
+| `W` `A` `S` `D` | Choose the next corner: straight on, left, turn around, right. The choice waits for the next intersection. |
+| `U` / `N` | Hold to climb / dive, up over the rooftops and back down. |
+| type `garbage` | Slow down and fly up to a tower to show the garbage file, as in the film: a scrolling column of directories stops on GARBAGE, which opens the CONFIDENTIAL FILES panel. |
+| `Q` | Leave the garbage file and carry on. |
+| `Esc` | Exit. |
+
+**Options** changes any of these keys, and the word. They're saved in
+`config.txt` as `key_left`, `key_right`, `key_straight`, `key_back`, `key_up`,
+`key_down`, `key_leave_file` and `garbage_word`.
 
 ## Sharing it with other Macs
 
