@@ -21,7 +21,7 @@ APPEX_MM = \
 	saver/GibsonScreenSaverExtension.mm \
 	saver/GibsonScreenSaverViewController.mm
 HOST_MM = app/GibsonApp.mm app/GibsonArrange.mm app/GibsonLidAngle.mm \
-	app/GibsonGame.mm app/GibsonGarbage.mm
+	app/GibsonGame.mm app/GibsonGarbage.mm app/GibsonFonts.mm app/GibsonSFX.mm
 SCN_MM = \
 	scenekit/GibsonSCNScene.mm \
 	scenekit/GibsonSCNCamera.mm \
@@ -44,7 +44,7 @@ SAVER_SCN_LIBS = \
 APPEX_LIBS = $(SAVER_SCN_LIBS) -framework ExtensionFoundation
 PREVIEW_LIBS = \
 	$(foreach n,$(SCN_FRAMEWORKS),-framework $n)
-HOST_LIBS = $(PREVIEW_LIBS) -framework AVFoundation -framework UniformTypeIdentifiers -framework IOKit
+HOST_LIBS = $(PREVIEW_LIBS) -framework AVFoundation -framework UniformTypeIdentifiers -framework IOKit -framework CoreText
 
 ROOT := $(abspath ..)
 DIST := $(ROOT)/dist
@@ -93,8 +93,8 @@ saver/%.o: saver/%.mm
 app/%.o: app/%.mm
 	$(CXX) $(CXXFLAGS) -fobjc-arc -mmacosx-version-min=$(SAVER_MIN_OS) $(SCN_INCLUDES) -c $< -o $@
 
-$(PREVIEW): $(SCN_OBJS) $(PREVIEW_OBJ) app/GibsonGarbage.o
-	$(CXX) $(CXXFLAGS) -fobjc-arc $(SCN_INCLUDES) -o $(PREVIEW) $(SCN_OBJS) $(PREVIEW_OBJ) app/GibsonGarbage.o $(PREVIEW_LIBS)
+$(PREVIEW): $(SCN_OBJS) $(PREVIEW_OBJ) app/GibsonGarbage.o app/GibsonFonts.o
+	$(CXX) $(CXXFLAGS) -fobjc-arc $(SCN_INCLUDES) -o $(PREVIEW) $(SCN_OBJS) $(PREVIEW_OBJ) app/GibsonGarbage.o app/GibsonFonts.o $(PREVIEW_LIBS) -framework CoreText
 
 scn: $(PREVIEW)
 	./$(PREVIEW)

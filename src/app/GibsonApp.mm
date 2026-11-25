@@ -1,6 +1,7 @@
 #import "GibsonSCNScene.h"
 #import "GibsonArrange.h"
 #import "GibsonGame.h"
+#import "GibsonSFX.h"
 
 #import <AVFoundation/AVFoundation.h>
 #import <Cocoa/Cocoa.h>
@@ -636,6 +637,11 @@ int main(int argc, char **argv)
             openArrange = YES;
         else if (std::strcmp(argv[i], "--game") == 0)
             openGame = YES;
+        else if (std::strcmp(argv[i], "--write-sounds") == 0 && i + 1 < argc)
+        {
+            [GibsonSFX writeSoundsTo:[NSString stringWithUTF8String:argv[++i]]];   // development
+            return 0;
+        }
         else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0)
         {
             std::fprintf(stderr,

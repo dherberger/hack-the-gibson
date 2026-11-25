@@ -1,9 +1,11 @@
 #import "GibsonGame.h"
 
 #import "GibsonCity.h"
+#import "GibsonFonts.h"
 #import "GibsonGarbage.h"
 #import "GibsonMusic.h"
 #import "GibsonSCNScene.h"
+#import "GibsonSFX.h"
 
 #import <SceneKit/SceneKit.h>
 #import <simd/simd.h>
@@ -212,7 +214,7 @@ typedef NS_ENUM(int, GibsonMode) { kModeTitle, kModeOptions, kModePlaying };
 static NSColor *gibson_cyan(CGFloat a) { return [NSColor colorWithSRGBRed:0.5 green:0.95 blue:1.0 alpha:a]; }
 static NSFont *gibson_ui_font(CGFloat size, NSFontWeight w)
 {
-    return [NSFont systemFontOfSize:size weight:w width:NSFontWidthExpanded];
+    return gibson_film_font(GibsonFontUI, size, w);
 }
 
 /* The title and options menus: a small dark panel, cyan type, a solid bar
@@ -251,12 +253,12 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
     glow.shadowColor = gibson_cyan(0.85);
     glow.shadowBlurRadius = 8;
     [_title drawAtPoint:NSMakePoint(kPad, kPad - 2)
-         withAttributes:@{
+         withAttributes:gibson_with_extras(@{
              NSFontAttributeName : gibson_ui_font(19, NSFontWeightBlack),
              NSForegroundColorAttributeName : gibson_cyan(1),
              NSShadowAttributeName : glow,
              NSKernAttributeName : @1.0,
-         }];
+         }, GibsonFontUI)];
 
     CGFloat y = kPad + kTitleH + 12;
     for (NSUInteger i = 0; i < _items.count; ++i, y += kRowH)
@@ -269,11 +271,11 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
             [[NSBezierPath bezierPathWithRoundedRect:row xRadius:2 yRadius:2] fill];
         }
         NSColor *ink = sel ? [NSColor colorWithWhite:0.02 alpha:1] : gibson_cyan(0.72);
-        NSDictionary *attrs = @{
+        NSDictionary *attrs = gibson_with_extras(@{
             NSFontAttributeName : gibson_ui_font(12.5, sel ? NSFontWeightHeavy : NSFontWeightSemibold),
             NSForegroundColorAttributeName : ink,
             NSKernAttributeName : @0.8,
-        };
+        }, GibsonFontUI);
         NSString *label = [(sel ? @"▸ " : @"   ") stringByAppendingString:_items[i]];
         const NSSize sz = [label sizeWithAttributes:attrs];
         [label drawAtPoint:NSMakePoint(kPad, NSMidY(row) - sz.height / 2) withAttributes:attrs];
@@ -286,11 +288,11 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
         }
     }
 
-    NSDictionary *fattrs = @{
+    NSDictionary *fattrs = gibson_with_extras(@{
         NSFontAttributeName : gibson_ui_font(9, NSFontWeightMedium),
         NSForegroundColorAttributeName : gibson_cyan(0.45),
         NSKernAttributeName : @0.6,
-    };
+    }, GibsonFontUI);
     [_footer drawAtPoint:NSMakePoint(kPad, y + 8) withAttributes:fattrs];
 }
 @end
@@ -306,11 +308,11 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
     CGFloat y = 0;
     for (NSUInteger i = 0; i < _lines.count; ++i)
     {
-        NSDictionary *a = @{
+        NSDictionary *a = gibson_with_extras(@{
             NSFontAttributeName : gibson_ui_font(i == 0 ? 11 : 9, i == 0 ? NSFontWeightHeavy : NSFontWeightMedium),
             NSForegroundColorAttributeName : gibson_cyan(i == 0 ? 0.85 : 0.5),
             NSKernAttributeName : @0.8,
-        };
+        }, GibsonFontUI);
         const NSSize sz = [_lines[i] sizeWithAttributes:a];
         [_lines[i] drawAtPoint:NSMakePoint(self.bounds.size.width - sz.width, y) withAttributes:a];
         y += sz.height + 3;
@@ -366,6 +368,11 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
     NSTimeInterval _stateStart;
     GibsonPose _fromPose, _endPose, _panPose;
     SCNNode *_hostTower;   // the tower carrying the file, dimmed while it's shown
+    SCNNode *_hostDecor;   // dark plates on its faces, holding the other lists
+    NSMutableArray<GibsonGarbageColumn *> *_decoys;
+    // last event counts seen, for the sound effects
+    NSUInteger _mainPulses;
+    BOOL _mainOpen;
     float _hostDim;
     double _approachS0, _approachD, _approachT, _approachC;
     BOOL _columnStopped;
@@ -378,6 +385,7 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
     if (!self)
         return nil;
     _media = media;
+    gibson_fonts_set_media(media);
     _lock = OS_UNFAIR_LOCK_INIT;
     _capturing = -1;
     _typed = [NSMutableString string];
@@ -455,6 +463,7 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
     [NSApp activateIgnoringOtherApps:YES];
     [NSCursor hide];
     [[GibsonMusic shared] viewDidStart];
+    [[GibsonSFX shared] start];
 
     __weak GibsonGameController *weakSelf = self;
     [self scheduleDemo];
@@ -505,7 +514,11 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
     _column = nil;
     _hostTower.opacity = 1;
     _hostTower = nil;
+    [_hostDecor removeFromParentNode];
+    _hostDecor = nil;
+    _decoys = nil;
     [[GibsonMusic shared] viewDidStop];
+    [[GibsonSFX shared] stop];
     [NSCursor unhide];
     [NSApp setPresentationOptions:NSApplicationPresentationDefault];
     _scnView.playing = NO;
@@ -1014,6 +1027,52 @@ static GibsonPose gibson_pose_of(SCNNode *camera)
 static const double kPushTime = 2.4;
 static const float kHostDim = 0.7f;   // how much the host tower's own glow drops
 
+/* The whole host tower turns into directory listings, as if it were
+ * filtering down to matches: every face goes dark and carries scrolling
+ * lists (one above and one below the real file on its face, two on each of
+ * the others), each at its own pace. Only the real one ever stops. */
+- (void)decorateTowerAt:(simd_double2)centre mainNormal:(simd_float3)mainNormal time:(NSTimeInterval)time
+{
+    _hostDecor = [SCNNode node];
+    _hostDecor.name = @"gibson-garbage-tower";
+    _hostDecor.opacity = 0;
+    [_world.worldRoot addChildNode:_hostDecor];
+    _decoys = [NSMutableArray array];
+
+    const float faceW = 2.f * GIBSON_CITY_TOWER_HALF;
+    const simd_float3 c = simd_make_float3((float)centre.x, 0, (float)centre.y);
+    const simd_float3 normals[4] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
+    for (const simd_float3 &n : normals)
+    {
+        const float turn = std::atan2(n.x, n.z);
+        const simd_float3 face = c + n * GIBSON_CITY_TOWER_HALF;
+        SCNNode *plate = [GibsonGarbageColumn facePlateWithWidth:faceW + 0.1f height:GIBSON_CITY_TOWER_TOP];
+        plate.simdPosition = face + n * 0.08f + simd_make_float3(0, GIBSON_CITY_TOWER_TOP / 2, 0);
+        plate.simdOrientation = simd_quaternion(turn, simd_make_float3(0, 1, 0));
+        [_hostDecor addChildNode:plate];
+
+        /* (width, height of centre, sideways offset) for each list here. */
+        const bool main = simd_dot(n, mainNormal) > 0.5f;
+        const simd_float3 mainSlots[] = { { 8.5f, 34.5f, -1.5f }, { 6.5f, 5.0f, 2.5f } };
+        const simd_float3 otherSlots[] = { { 10.f, 30.f, -1.f }, { 8.f, 12.f, 1.5f } };
+        const simd_float3 *slots = main ? mainSlots : otherSlots;
+        const simd_float3 across = simd_make_float3(n.z, 0, -n.x);   // the face's left-to-right
+        for (int i = 0; i < 2; ++i)
+        {
+            const simd_float3 s = slots[i];
+            const simd_float3 at = face + n * 0.15f + across * s.z + simd_make_float3(0, s.y, 0);
+            GibsonGarbageColumn *list = [[GibsonGarbageColumn alloc] initWithParent:_hostDecor
+                                                                             center:at
+                                                                             normal:n
+                                                                              width:s.x
+                                                                               time:time];
+            list.linesPerSecond = 5.0 + arc4random_uniform(60) / 10.0;
+            [list revealAtTime:time];
+            [_decoys addObject:list];
+        }
+    }
+}
+
 - (void)beginGarbageAtTime:(NSTimeInterval)time
 {
     [self extendRoute:200 forceStraight:YES];
@@ -1041,10 +1100,10 @@ static const float kHostDim = 0.7f;   // how much the host tower's own glow drop
                                                    normal:normal
                                                     width:kColumnWidth
                                                      time:time];
-    [_column darkenFaceWidth:2.f * GIBSON_CITY_TOWER_HALF + 0.1f
-                      height:GIBSON_CITY_TOWER_TOP
-                     offsetY:GIBSON_CITY_TOWER_TOP / 2 - kColumnY];
+    _mainPulses = 0;
+    _mainOpen = NO;
     [_column revealAtTime:time];
+    [self decorateTowerAt:centre mainNormal:normal time:time];
     _hostTower = [_world towerNodeAtX:(float)centre.x z:(float)centre.y];
     _columnStopped = NO;
     _endPose.pos = faceP + normal * dist;
@@ -1203,7 +1262,31 @@ static const float kHostDim = 0.7f;   // how much the host tower's own glow drop
             _hostTower = nil;
         }
     }
+    if (_hostDecor)
+    {
+        _hostDecor.opacity = _hostDim;
+        for (GibsonGarbageColumn *list in _decoys)
+            [list updateAtTime:time];
+        if (!showing && _hostDim < 0.01f)
+        {
+            [_hostDecor removeFromParentNode];
+            _hostDecor = nil;
+            _decoys = nil;
+        }
+    }
     [_column updateAtTime:time];
+    if (_column && showing)
+    {
+        if (_column.fileOpen && !_mainOpen)
+            [[GibsonSFX shared] select];
+        if (_column.pulses != _mainPulses)
+            [[GibsonSFX shared] pulse];
+    }
+    if (_column)
+    {
+        _mainPulses = _column.pulses;
+        _mainOpen = _column.fileOpen;
+    }
     if (_column.finished)
         _column = nil;
     gibson_apply_pose(camera, pose);

@@ -2,6 +2,8 @@
 
 #import <AppKit/AppKit.h>
 
+#import "GibsonFonts.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -19,13 +21,13 @@ static NSString *const kNames[] = {
 };
 static const int kCycle = sizeof(kNames) / sizeof(kNames[0]);
 
-static const int kRows = 18;          // lines visible on the tower
-static const int kGarbageRow = 8;     // where GARBAGE comes to rest (the film's ninth line)
+static const int kRows = 24;          // lines visible on the tower
+static const int kGarbageRow = 11;    // where GARBAGE comes to rest (just above the middle, as in the film)
 static const CGFloat kLineH = 48;     // texture pixels per line
 static const CGFloat kTexW = 1024;
 static const CGFloat kNameRight = 600;
-static const CGFloat kPanelLeft = 690;
-static const CGFloat kPanelRight = 1000;
+static const CGFloat kPanelLeft = 636;   // just right of the ▸ markers (they end at ~623)
+static const CGFloat kPanelRight = 912;
 
 /* Timing, measured from the clip at 120 fps. */
 static const double kScrollSpeed = 8.0;    // lines per second while scrolling
@@ -46,7 +48,7 @@ static NSColor *gibson_blue_glow(CGFloat a) { return [NSColor colorWithSRGBRed:0
 
 static NSFont *gibson_font(CGFloat size, NSFontWeight weight)
 {
-    return [NSFont systemFontOfSize:size weight:weight width:NSFontWidthExpanded];
+    return gibson_film_font(GibsonFontList, size, weight);
 }
 
 static NSShadow *gibson_glow(NSColor *color, CGFloat blur)
@@ -61,12 +63,12 @@ static NSShadow *gibson_glow(NSColor *color, CGFloat blur)
 static void gibson_text(NSString *text, CGFloat size, NSFontWeight weight, NSColor *color,
                         NSColor *glow, CGFloat x, CGFloat y, int align /* -1 right, 0 centre */)
 {
-    NSDictionary *attrs = @{
+    NSDictionary *attrs = gibson_with_extras(@{
         NSFontAttributeName : gibson_font(size, weight),
         NSForegroundColorAttributeName : color,
         NSShadowAttributeName : gibson_glow(glow, 9),
         NSKernAttributeName : @(size * 0.04),
-    };
+    }, GibsonFontList);
     const NSSize sz = [text sizeWithAttributes:attrs];
     const CGFloat left = align < 0 ? x - sz.width : x - sz.width / 2;
     [text drawAtPoint:NSMakePoint(left, y - sz.height / 2) withAttributes:attrs];
@@ -78,9 +80,9 @@ static void gibson_marker(CGFloat x, CGFloat cy, NSColor *color, NSColor *glow)
     [gibson_glow(glow, 8) set];
     [color setFill];
     NSBezierPath *p = [NSBezierPath bezierPath];
-    [p moveToPoint:NSMakePoint(x, cy - 8)];
-    [p lineToPoint:NSMakePoint(x + 15, cy)];
-    [p lineToPoint:NSMakePoint(x, cy + 8)];
+    [p moveToPoint:NSMakePoint(x, cy - 6)];
+    [p lineToPoint:NSMakePoint(x + 11, cy)];
+    [p lineToPoint:NSMakePoint(x, cy + 6)];
     [p closePath];
     [p fill];
     [NSGraphicsContext restoreGraphicsState];
@@ -113,25 +115,25 @@ static CGImageRef gibson_render(int top, int rows, int highlightRow, int boxes, 
         const bool hl = r == highlightRow;
         if (hl && blinkOff)
             continue;
-        gibson_text(kNames[idx], 25, NSFontWeightBlack, hl ? blue : ink, hl ? blueGlow : inkGlow,
+        gibson_text(kNames[idx], 19, NSFontWeightBlack, hl ? blue : ink, hl ? blueGlow : inkGlow,
                     kNameRight, cy, -1);
-        gibson_marker(kNameRight + 14, cy, hl ? blue : ink, hl ? blueGlow : inkGlow);
+        gibson_marker(kNameRight + 12, cy, hl ? blue : ink, hl ? blueGlow : inkGlow);
     }
 
     if (highlightRow >= 0 && !blinkOff)
     {
         const CGFloat mid = (kPanelLeft + kPanelRight) / 2;
         const CGFloat head = (highlightRow - 2) * kLineH;
-        gibson_text(@"CONFIDENTIAL", 19, NSFontWeightBlack, blue, blueGlow, mid, head + 14, 0);
-        gibson_text(@"FILES", 15, NSFontWeightBlack, blue, blueGlow, mid, head + 34, 0);
+        gibson_text(@"CONFIDENTIAL", 16, NSFontWeightBlack, blue, blueGlow, mid, head + 14, 0);
+        gibson_text(@"FILES", 12.5, NSFontWeightBlack, blue, blueGlow, mid, head + 34, 0);
         const CGFloat note = (highlightRow - 1) * kLineH;
-        gibson_text(@"DO NOT DELETE", 10.5, NSFontWeightHeavy, blue, blueGlow, mid, note + 10, 0);
-        gibson_text(@"BEFORE FINAL", 10.5, NSFontWeightHeavy, blue, blueGlow, mid, note + 23, 0);
-        gibson_text(@"BACKUP IS COMPLETED", 10.5, NSFontWeightHeavy, blue, blueGlow, mid, note + 36, 0);
+        gibson_text(@"DO NOT DELETE", 9, NSFontWeightHeavy, blue, blueGlow, mid, note + 10, 0);
+        gibson_text(@"BEFORE FINAL", 9, NSFontWeightHeavy, blue, blueGlow, mid, note + 23, 0);
+        gibson_text(@"BACKUP IS COMPLETED", 9, NSFontWeightHeavy, blue, blueGlow, mid, note + 36, 0);
         for (int b = 0; b < boxes; ++b)
         {
             const CGFloat y = (highlightRow + b) * kLineH;
-            const NSRect box = NSMakeRect(kPanelLeft + 28, y + 4, kPanelRight - kPanelLeft - 56, 28);
+            const NSRect box = NSMakeRect(kPanelLeft + 14, y + 6, kPanelRight - kPanelLeft - 28, 24);
             [NSGraphicsContext saveGraphicsState];
             [gibson_glow(blueGlow, 8) set];
             [blue setStroke];
@@ -139,9 +141,9 @@ static CGImageRef gibson_render(int top, int rows, int highlightRow, int boxes, 
             frame.lineWidth = 3;
             [frame stroke];
             [NSGraphicsContext restoreGraphicsState];
-            gibson_text([NSString stringWithFormat:@"FILE %d", b + 1], 17, NSFontWeightBlack, blue,
+            gibson_text([NSString stringWithFormat:@"FILE %d", b + 1], 14, NSFontWeightBlack, blue,
                         blueGlow, NSMidX(box), NSMidY(box), 0);
-            gibson_text(@"WAITING FOR BACKUP", 9.5, NSFontWeightHeavy, blue, blueGlow, mid, y + 41, 0);
+            gibson_text(@"WAITING FOR BACKUP", 8, NSFontWeightHeavy, blue, blueGlow, mid, y + 41, 0);
         }
     }
 
@@ -228,6 +230,7 @@ typedef NS_ENUM(int, GibsonColumnPhase) { kScrolling, kStopping, kStopped };
 
 
     _phase = kScrolling;
+    _linesPerSecond = kScrollSpeed;
     _start = time;
     _top0 = arc4random_uniform(kCycle);
     _shown = -1;
@@ -237,6 +240,9 @@ typedef NS_ENUM(int, GibsonColumnPhase) { kScrolling, kStopping, kStopped };
 
 - (void)showTop:(double)top
 {
+    /* As in the film: no smooth glide, each step drops every entry down one
+       line. (Slowing down just spaces the steps out.) */
+    top = std::floor(top + 1e-6);
     const double cycle = std::fmod(std::fmod(top, kCycle) + kCycle, kCycle);
     const SCNMatrix4 scale = SCNMatrix4MakeScale(1, (CGFloat)kRows / kCycle, 1);
     const SCNMatrix4 shift = SCNMatrix4MakeTranslation(0, cycle / kCycle, 0);
@@ -247,6 +253,8 @@ typedef NS_ENUM(int, GibsonColumnPhase) { kScrolling, kStopping, kStopped };
 {
     if (index == _shown)
         return;
+    if (_shown == 5)
+        ++_pulses;   // lit again after a dark half
     _shown = index;
     _material.diffuse.contents = _frames[index];
     _material.diffuse.contentsTransform = SCNMatrix4Identity;
@@ -257,7 +265,7 @@ typedef NS_ENUM(int, GibsonColumnPhase) { kScrolling, kStopping, kStopped };
 {
     if (_phase != kScrolling)
         return;
-    const double top = _top0 - kScrollSpeed * (time - _start);
+    const double top = _top0 - _linesPerSecond * (time - _start);
     /* The nearest resting place at least 6 lines on: a top line that puts a
        GARBAGE entry on kGarbageRow. Ease out from scrolling speed to it. */
     int rest = (int)std::floor(top - 6);
@@ -271,7 +279,7 @@ typedef NS_ENUM(int, GibsonColumnPhase) { kScrolling, kStopping, kStopped };
     _stopStart = time;
     _stopFrom = top;
     _stopDistance = top - rest;
-    _stopDuration = 2.0 * _stopDistance / kScrollSpeed;
+    _stopDuration = 2.0 * _stopDistance / _linesPerSecond;
     _restTop = rest;
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
@@ -298,7 +306,7 @@ typedef NS_ENUM(int, GibsonColumnPhase) { kScrolling, kStopping, kStopped };
     });
 }
 
-- (void)darkenFaceWidth:(float)width height:(float)height offsetY:(float)offsetY
++ (SCNNode *)facePlateWithWidth:(float)width height:(float)height
 {
     SCNPlane *plate = [SCNPlane planeWithWidth:width height:height];
     SCNMaterial *pm = [SCNMaterial material];
@@ -308,10 +316,9 @@ typedef NS_ENUM(int, GibsonColumnPhase) { kScrolling, kStopping, kStopped };
     pm.writesToDepthBuffer = YES;   // hides the tower's own text drawn after it
     pm.doubleSided = YES;
     plate.materials = @[ pm ];
-    SCNNode *plateNode = [SCNNode nodeWithGeometry:plate];
-    plateNode.position = SCNVector3Make(0, offsetY, -0.07);
-    plateNode.renderingOrder = 99;
-    [_node addChildNode:plateNode];
+    SCNNode *node = [SCNNode nodeWithGeometry:plate];
+    node.renderingOrder = 99;
+    return node;
 }
 
 - (void)revealAtTime:(NSTimeInterval)time
@@ -356,7 +363,7 @@ typedef NS_ENUM(int, GibsonColumnPhase) { kScrolling, kStopping, kStopped };
 
     if (_phase == kScrolling)
     {
-        [self showTop:_top0 - kScrollSpeed * (time - _start)];
+        [self showTop:_top0 - _linesPerSecond * (time - _start)];
         return;
     }
     if (_phase == kStopping)

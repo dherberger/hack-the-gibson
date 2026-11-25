@@ -1,5 +1,6 @@
 #import "GibsonSCNScene.h"
 #import "GibsonGarbage.h"
+#import "GibsonFonts.h"
 
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
@@ -183,6 +184,7 @@ static int gibson_write_wall(NSURL *media, const char *dir, double atTime)
 
 static int gibson_write_garbage(NSURL *media, const char *dir)
 {
+    gibson_fonts_set_media(media);
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     [[NSFileManager defaultManager] createDirectoryAtPath:[NSString stringWithUTF8String:dir]
                               withIntermediateDirectories:YES attributes:nil error:nil];
@@ -208,7 +210,10 @@ static int gibson_write_garbage(NSURL *media, const char *dir)
                                                          normal:normal
                                                           width:width
                                                            time:0];
-    [driver.column darkenFaceWidth:14.7f height:43.5f offsetY:43.5f / 2 - 18.f];
+    SCNNode *plate = [GibsonGarbageColumn facePlateWithWidth:14.7f height:43.5f];
+    plate.simdPosition = simd_make_float3(15.f - 7.3f - 0.08f, 43.5f / 2, 30.f);
+    plate.simdOrientation = simd_quaternion(-(float)M_PI / 2, simd_make_float3(0, 1, 0));
+    [world.worldRoot addChildNode:plate];
     [driver.column revealAtTime:0];
     [world towerNodeAtX:15 z:30].opacity = 0.3;
     const double shots[] = { 1.0, 6.0, 7.2, 8.0 };

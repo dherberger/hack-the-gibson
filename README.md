@@ -131,6 +131,7 @@ created on first run:
 | `music_enabled` | `no` | `yes` to loop a soundtrack while the screensaver runs (see [Music](#music)). |
 | `music` | `music.mp3` | The audio file to play, in the same folder as `config.txt`. |
 | `music_volume` | `0.6` | Music volume, 0–1. |
+| `sfx_volume` | `0.6` | Volume of the game's garbage-file sound effects (the selection beep and the blink pulse), 0–1. `0` turns them off. |
 | `show_timer` | `no` | `yes` shows a small elapsed-time readout (mm:ss.t) in the bottom-right corner of each display, for timing what you see. The log's heartbeat lines carry the same `t=` time. |
 | `span_displays` | `yes` | With several displays, `yes` makes them windows onto one view (place them with **Arrange Displays…** in the app); `no` shows the same picture on each. |
 | `render_scale` | `1` | Pixels rendered per point, scaled up to the display (0.5–2). `1` is a quarter of a Retina display's pixels; `2` is full Retina, much sharper and about four times the GPU work. The app's **Render quality** menu sets it. |
@@ -183,9 +184,41 @@ right while the flythrough carries on behind it; use ↑ ↓ and Return to choos
 | `Q` | Leave the garbage file and carry on. |
 | `Esc` | Exit. |
 
+The garbage file has its own sound, synthesized after the film's: a
+stuttering beep as GARBAGE is selected, and a pulse on each blink. Set the
+volume with `sfx_volume` in `config.txt`.
+
 **Options** changes any of these keys, and the word. They're saved in
 `config.txt` as `key_left`, `key_right`, `key_straight`, `key_back`, `key_up`,
 `key_down`, `key_leave_file` and `garbage_word`.
+
+### Fonts
+
+The film's lettering is a stretched Eurostile / Microgramma Extended. Out of
+the box the game uses [Michroma](https://github.com/googlefonts/Michroma-font),
+a free Microgramma lookalike bundled in `media/fonts/` (SIL Open Font
+License, see `media/fonts/Michroma-OFL.txt`).
+
+For the real thing, use your own copies of the originals. They're
+commercial fonts, so they aren't included and shouldn't be committed:
+
+1. Get licensed copies of **Eurostile Extended Black** and/or **Microgramma D
+   Bold Extended** (`.ttf` or `.otf`).
+2. Put the files in `~/Library/Application Support/TheGibson/fonts/`:
+
+   ```bash
+   mkdir -p ~/Library/Application\ Support/TheGibson/fonts
+   cp EurostileExtendedBlack.ttf "Microgramma D Extended Bold.otf" \
+      ~/Library/Application\ Support/TheGibson/fonts/
+   ```
+
+3. Start the game again. The garbage file uses Eurostile (or Microgramma if
+   that's all there is), and the menus use Microgramma (or Eurostile).
+
+The fonts are loaded for the game only, not installed system-wide. The game
+looks for them by name (`EurostileExtended-Black`, `EurostileLTStd-BoldEx2`,
+`MicrogrammaD-BoldExte`, `MicrogrammaD-ExtdBold`); other cuts fall back to
+Michroma.
 
 ## Sharing it with other Macs
 

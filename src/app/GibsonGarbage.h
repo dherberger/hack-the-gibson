@@ -22,6 +22,8 @@
 @property (nonatomic, readonly) BOOL finished;
 /* True once the file is open (panel shown): the sequence has played out. */
 @property (nonatomic, readonly) BOOL fileOpen;
+/* For sound: blinks lit again after the first selection. */
+@property (nonatomic, readonly) NSUInteger pulses;
 
 /* center: middle of the column, just off the tower face. normal: the face's
  * outward direction (horizontal). City coordinates. */
@@ -30,9 +32,11 @@
                         normal:(simd_float3)normal
                          width:(float)width
                           time:(NSTimeInterval)time;
-/* Darken the tower face behind the column: a plate `width` x `height`,
- * centred `offsetY` above the column's centre. */
-- (void)darkenFaceWidth:(float)width height:(float)height offsetY:(float)offsetY;
+/* A dark plate for a tower face (facing +z; position and turn it), so the
+ * columns read against the tower's own bright text. */
++ (SCNNode *)facePlateWithWidth:(float)width height:(float)height;
+/* Scrolling speed; set before it starts stopping. Default 8 (the film's). */
+@property (nonatomic) double linesPerSecond;
 /* The column starts hidden (it scrolls all the same); show it, fading in. */
 @property (nonatomic, readonly) BOOL revealed;
 - (void)revealAtTime:(NSTimeInterval)time;
