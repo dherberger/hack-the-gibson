@@ -69,12 +69,13 @@ static std::vector<float> gibson_chord(double seconds, const std::vector<GibsonP
 /* Select: a 25 Hz trill between two square-ish beeps, 20 ms each: 1755 Hz
    (with its odd harmonics at 5.27, 8.86 and 12.3 kHz) and 4547 Hz (with its
    third, 13.6 kHz). 0.42 s, starting on the low beep. Measured from a clean
-   capture of the film's sound. */
+   capture of the film's sound, then roughened: louder upper harmonics, hard
+   switching between the beeps, and a little clipping. */
 static std::vector<float> gibson_select(void)
 {
     const std::vector<GibsonPartial> partials = {
-        { 1755, 1.0 }, { 5265, 0.15 }, { 8859, 0.08 }, { 12285, 0.06 },   // low beep
-        { 4547, 0.6 }, { 13641, 0.07 },                                  // high beep
+        { 1755, 1.0 }, { 5265, 0.33 }, { 8859, 0.2 }, { 12285, 0.14 },   // low beep
+        { 4547, 0.7 }, { 13641, 0.2 },                                  // high beep
     };
     const double length = 0.42, half = 0.020;
     std::vector<float> s = gibson_chord(length, partials, ^double(double t, size_t p) {
@@ -82,46 +83,56 @@ static std::vector<float> gibson_select(void)
         double g = 0;
         for (int k = 0; k * half < length; ++k)
             if ((k % 2 == 1) == high)
-                g += gibson_gate(t, k * half, half, 0.001);
-        // Each beep dips rather than stops while the other sounds.
-        return gibson_gate(t, 0, length, 0.002) * (0.3 + 0.7 * std::min(1.0, g));
+                g += gibson_gate(t, k * half, half, 0.0003);
+        // Each beep all but stops while the other sounds.
+        return gibson_gate(t, 0, length, 0.002) * (0.08 + 0.92 * std::min(1.0, g));
     });
+    gibson_normalize(s, 1.0f);
+    for (float &v : s)
+        v = std::tanh(2.2f * v);
     gibson_normalize(s, 0.45f);
     return s;
 }
 
-/* Pulse, one per lit half of the blink (~0.45 s), as measured:
+/* Pulse, one per lit half of the blink. As measured from the film (~0.45 s),
+   then drawn out by kStretch to fill the game's slower, longer blink; the
+   bursts keep the film's rate:
      0-0.11 s     7934 Hz in bursts (20 ms on, every 34 ms) over a steady 4300
      0.05-0.32 s  a sustained 7043 Hz carrying it, fading out
      0.08-0.17 s  a short 3064 Hz
      0.11-0.42 s  6117 Hz bursts (18 ms on, every 34 ms) with 2432 Hz bursts
-                  12 ms ahead of them */
+                  12 ms ahead of them
+   (times before stretching). */
 static std::vector<float> gibson_pulse(void)
 {
     const std::vector<GibsonPartial> partials = {
         { 7934, 0.74 }, { 4300, 0.16 }, { 7043, 1.0 }, { 3064, 0.16 }, { 6117, 0.3 }, { 2432, 0.16 },
     };
-    const double length = 0.45, period = 0.034;
+    const double S = 1.85;   // kStretch
+    const double length = 0.45 * S, period = 0.034;
     std::vector<float> s = gibson_chord(length, partials, ^double(double t, size_t p) {
         double g = 0;
         switch (p)
         {
         case 0:
-            for (int k = 0; k < 4; ++k)
+            for (int k = 0; k * period < 0.11 * S; ++k)
                 g += gibson_gate(t, k * period, 0.020, 0.0015);
-            return gibson_gate(t, 0, 4 * period, 0.002) * (0.35 + 0.65 * std::min(1.0, g));
+            return gibson_gate(t, 0, 0.11 * S, 0.002) * (0.35 + 0.65 * std::min(1.0, g));
         case 1:
-            return gibson_gate(t, 0, 0.11, 0.004);
+            return gibson_gate(t, 0, 0.11 * S, 0.004);
         case 2:
-            return gibson_gate(t, 0.05, 0.27, 0.006) * (1.0 - 0.5 * std::max(0.0, t - 0.05) / 0.27);
+            return gibson_gate(t, 0.05 * S, 0.27 * S, 0.006) *
+                   (1.0 - 0.5 * std::max(0.0, t - 0.05 * S) / (0.27 * S));
         case 3:
-            return gibson_gate(t, 0.08, 0.09, 0.004);
+            return gibson_gate(t, 0.08 * S, 0.09 * S, 0.004);
         default:
         {
             const double lead = (p == 5) ? -0.012 : 0.0;
-            for (int k = 0; 0.11 + k * period < 0.42; ++k)
-                g += gibson_gate(t, 0.11 + k * period + lead, 0.018, 0.0015);
-            return gibson_gate(t, 0.11 + lead, 0.31, 0.002) * (0.35 + 0.65 * std::min(1.0, g));
+            for (int k = 0; 0.11 * S + k * period < 0.42 * S; ++k)
+                g += gibson_gate(t, 0.11 * S + k * period + lead, 0.018, 0.0015);
+            // Tails off over the last third rather than stopping.
+            const double tail = std::min(1.0, std::max(0.0, (0.42 * S - t) / (0.12 * S)));
+            return gibson_gate(t, 0.11 * S + lead, 0.31 * S, 0.002) * tail * (0.35 + 0.65 * std::min(1.0, g));
         }
         }
     });

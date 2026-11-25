@@ -21,25 +21,24 @@
 // Key bindings
 
 typedef NS_ENUM(int, GibsonAction) {
-    kActLeft,
-    kActRight,
-    kActStraight,
-    kActBack,
     kActUp,
+    kActLeft,
     kActDown,
+    kActRight,
     kActLeave,
     kActCount
 };
 
 static const char *const kActKeys[kActCount] = {
-    "key_left", "key_right", "key_straight", "key_back", "key_up", "key_down", "key_leave_file",
+    "key_up", "key_left", "key_down", "key_right", "key_leave_file",
 };
-static NSString *const kActDefaults[kActCount] = { @"a", @"d", @"w", @"s", @"u", @"n", @"q" };
+static NSString *const kActDefaults[kActCount] = { @"w", @"a", @"s", @"d", @"q" };
 static NSString *const kActLabels[kActCount] = {
-    @"TURN LEFT", @"TURN RIGHT", @"GO STRAIGHT", @"TURN AROUND", @"CLIMB", @"DIVE", @"LEAVE THE FILE",
+    @"CLIMB", @"TURN LEFT", @"DIVE", @"TURN RIGHT", @"LEAVE THE FILE",
 };
 static const char *const kWordKey = "garbage_word";
 static NSString *const kWordDefault = @"garbage";
+static const char *const kHUDKey = "show_hud";
 
 /* A key's name as stored in config.txt: a lowercase character, or one of
  * left/right/up/down/space. nil for keys that can't be bound. */
@@ -218,25 +217,29 @@ static NSFont *gibson_ui_font(CGFloat size, NSFontWeight w)
 }
 
 /* The title and options menus: a small dark panel, cyan type, a solid bar
- * on the selected row. */
+ * on the selected row. A title heads the panel only when set. */
 @interface GibsonMenuView : NSView
 @property (nonatomic, copy) NSString *title;
 @property (nonatomic, copy) NSArray<NSString *> *items;
 @property (nonatomic, copy) NSArray<NSString *> *values;   // right column (options), or nil
 @property (nonatomic) NSInteger selected;
-@property (nonatomic, copy) NSString *footer;
 @property (nonatomic) CGFloat panelWidth;
 - (NSSize)fittingPanelSize;
 @end
 
 @implementation GibsonMenuView
-static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
+static const CGFloat kRowH = 30, kPad = 14, kTitleH = 42;
 
 - (BOOL)isFlipped { return YES; }
 
 - (NSSize)fittingPanelSize
 {
-    return NSMakeSize(_panelWidth, kPad + kTitleH + 12 + _items.count * kRowH + 10 + kFooterH + kPad - 4);
+    return NSMakeSize(_panelWidth, [self rowsTop] + _items.count * kRowH + kPad - 4);
+}
+
+- (CGFloat)rowsTop
+{
+    return kPad + (_title.length ? kTitleH : 0);
 }
 
 - (void)drawRect:(NSRect)dirty
@@ -252,7 +255,7 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
     NSShadow *glow = [[NSShadow alloc] init];
     glow.shadowColor = gibson_cyan(0.85);
     glow.shadowBlurRadius = 8;
-    [_title drawAtPoint:NSMakePoint(kPad, kPad - 2)
+    [_title drawAtPoint:NSMakePoint(kPad + 4, kPad)
          withAttributes:gibson_with_extras(@{
              NSFontAttributeName : gibson_ui_font(19, NSFontWeightBlack),
              NSForegroundColorAttributeName : gibson_cyan(1),
@@ -260,7 +263,7 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
              NSKernAttributeName : @1.0,
          }, GibsonFontUI)];
 
-    CGFloat y = kPad + kTitleH + 12;
+    CGFloat y = [self rowsTop];
     for (NSUInteger i = 0; i < _items.count; ++i, y += kRowH)
     {
         const BOOL sel = (NSInteger)i == _selected;
@@ -278,7 +281,7 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
         }, GibsonFontUI);
         NSString *label = [(sel ? @"▸ " : @"   ") stringByAppendingString:_items[i]];
         const NSSize sz = [label sizeWithAttributes:attrs];
-        [label drawAtPoint:NSMakePoint(kPad, NSMidY(row) - sz.height / 2) withAttributes:attrs];
+        [label drawAtPoint:NSMakePoint(kPad + 4, NSMidY(row) - sz.height / 2) withAttributes:attrs];
         if (i < _values.count && _values[i].length)
         {
             NSString *v = _values[i];
@@ -287,36 +290,24 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
                 withAttributes:attrs];
         }
     }
-
-    NSDictionary *fattrs = gibson_with_extras(@{
-        NSFontAttributeName : gibson_ui_font(9, NSFontWeightMedium),
-        NSForegroundColorAttributeName : gibson_cyan(0.45),
-        NSKernAttributeName : @0.6,
-    }, GibsonFontUI);
-    [_footer drawAtPoint:NSMakePoint(kPad, y + 8) withAttributes:fattrs];
 }
 @end
 
-/* Small readout in the corner while playing. */
+/* A tiny, faint readout in the corner while playing, easy to miss for
+ * anyone watching. Off with show_hud = no (or in Options). */
 @interface GibsonHUDView : NSView
-@property (nonatomic, copy) NSArray<NSString *> *lines;
+@property (nonatomic, copy) NSString *text;
 @end
 @implementation GibsonHUDView
-- (BOOL)isFlipped { return YES; }
 - (void)drawRect:(NSRect)dirty
 {
-    CGFloat y = 0;
-    for (NSUInteger i = 0; i < _lines.count; ++i)
-    {
-        NSDictionary *a = gibson_with_extras(@{
-            NSFontAttributeName : gibson_ui_font(i == 0 ? 11 : 9, i == 0 ? NSFontWeightHeavy : NSFontWeightMedium),
-            NSForegroundColorAttributeName : gibson_cyan(i == 0 ? 0.85 : 0.5),
-            NSKernAttributeName : @0.8,
-        }, GibsonFontUI);
-        const NSSize sz = [_lines[i] sizeWithAttributes:a];
-        [_lines[i] drawAtPoint:NSMakePoint(self.bounds.size.width - sz.width, y) withAttributes:a];
-        y += sz.height + 3;
-    }
+    NSDictionary *a = gibson_with_extras(@{
+        NSFontAttributeName : gibson_ui_font(7, NSFontWeightMedium),
+        NSForegroundColorAttributeName : gibson_cyan(0.32),
+        NSKernAttributeName : @0.5,
+    }, GibsonFontUI);
+    const NSSize sz = [_text sizeWithAttributes:a];
+    [_text drawAtPoint:NSMakePoint(self.bounds.size.width - sz.width, 0) withAttributes:a];
 }
 @end
 
@@ -344,6 +335,7 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
     NSMutableString *_wordDraft;    // typing a new garbage word
     NSString *_bindings[kActCount];
     NSString *_word;
+    BOOL _showHUD;
     NSMutableString *_typed;        // letters of the garbage word typed so far
     NSMutableArray<NSString *> *_swallowed;   // ...and the keys they were
     NSTimeInterval _typedAt;
@@ -373,7 +365,9 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
     // last event counts seen, for the sound effects
     NSUInteger _mainPulses;
     BOOL _mainOpen;
-    float _hostDim;
+    float _hostDim;      // host tower's dark tint, 0-1
+    float _listFade;     // its directory listings, 0-1
+    float _approachX;    // progress through the approach, 0-1
     double _approachS0, _approachD, _approachT, _approachC;
     BOOL _columnStopped;
     GibsonGarbageColumn *_column;
@@ -405,6 +399,9 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
     }
     NSString *w = [NSString stringWithUTF8String:gibson_settings_raw(kWordKey)].lowercaseString;
     _word = w.length >= 2 ? w : kWordDefault;
+    NSString *h = [NSString stringWithUTF8String:gibson_settings_raw(kHUDKey)].lowercaseString;
+    _showHUD = !([h isEqualToString:@"no"] || [h isEqualToString:@"off"] || [h isEqualToString:@"false"] ||
+                 [h isEqualToString:@"0"]);
 }
 
 - (void)saveBinding:(int)i
@@ -535,7 +532,7 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
     NSMutableArray *items = [NSMutableArray array];
     for (int i = 0; i < kActCount; ++i)
         [items addObject:kActLabels[i]];
-    [items addObjectsFromArray:@[ @"GARBAGE WORD", @"RESET TO DEFAULTS", @"BACK" ]];
+    [items addObjectsFromArray:@[ @"GARBAGE WORD", @"SHOW HUD", @"RESET TO DEFAULTS", @"BACK" ]];
     return items;
 }
 
@@ -549,12 +546,11 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
     _menu.hidden = NO;
     if (_mode == kModeTitle)
     {
-        _menu.title = @"HACK THE GIBSON";
+        _menu.title = nil;
         _menu.items = @[ @"START GAME", @"OPTIONS", @"EXIT" ];
         _menu.values = nil;
         _menu.selected = _titleSel;
-        _menu.footer = @"↑ ↓  SELECT     RETURN  CHOOSE     ESC  EXIT";
-        _menu.panelWidth = 300;
+        _menu.panelWidth = 240;
     }
     else
     {
@@ -564,14 +560,11 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
         [values addObject:_capturing == kActCount
                               ? [NSString stringWithFormat:@"%@_", _wordDraft.uppercaseString]
                               : _word.uppercaseString];
-        [values addObjectsFromArray:@[ @"", @"" ]];
+        [values addObjectsFromArray:@[ _showHUD ? @"ON" : @"OFF", @"", @"" ]];
         _menu.title = @"OPTIONS";
         _menu.items = [self optionItems];
         _menu.values = values;
         _menu.selected = _optionsSel;
-        _menu.footer = _capturing == kActCount ? @"TYPE A WORD     RETURN  SAVE     ESC  CANCEL"
-                       : _capturing >= 0       ? @"PRESS THE NEW KEY     ESC  CANCEL"
-                                               : @"↑ ↓  SELECT     RETURN  CHANGE     ESC  EXIT";
         _menu.panelWidth = 430;
     }
     const NSSize size = [_menu fittingPanelSize];
@@ -582,7 +575,7 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
 
 - (void)refreshHUD
 {
-    if (_mode != kModePlaying)
+    if (_mode != kModePlaying || !_showHUD)
     {
         _hud.hidden = YES;
         return;
@@ -596,29 +589,24 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
     alt = _hudAlt;
     os_unfair_lock_unlock(&_lock);
 
-    NSArray<NSString *> *lines;
+    NSString *text;
     if (inFile)
-        lines = @[ [NSString stringWithFormat:@"PRESS %@ TO LEAVE THE FILE",
-                                              gibson_key_label(_bindings[kActLeave])] ];
+        text = [NSString stringWithFormat:@"%@ LEAVE", gibson_key_label(_bindings[kActLeave])];
     else
     {
-        NSString *next = turn == kTurnLeft    ? @"◂ LEFT"
-                         : turn == kTurnRight ? @"RIGHT ▸"
-                         : turn == kTurnBack  ? @"TURN AROUND"
-                                              : @"STRAIGHT";
-        lines = @[
-            [NSString stringWithFormat:@"NEXT CORNER  %@", next],
-            [NSString stringWithFormat:@"ALTITUDE %.0f", alt],
-            [NSString stringWithFormat:@"TYPE %@ · ESC EXIT", _word.uppercaseString],
-        ];
+        NSString *next = turn == kTurnLeft    ? @"◂"
+                         : turn == kTurnRight ? @"▸"
+                         : turn == kTurnBack  ? @"▾"
+                                              : @"▴";
+        text = [NSString stringWithFormat:@"%@  %.0f", next, alt];
     }
-    if (![lines isEqualToArray:_hud.lines])
+    if (![text isEqualToString:_hud.text])
     {
-        _hud.lines = lines;
+        _hud.text = text;
         [_hud setNeedsDisplay:YES];
     }
     const NSRect b = _content.bounds;
-    _hud.frame = NSMakeRect(NSMaxX(b) - 336, 30, 300, 52);
+    _hud.frame = NSMakeRect(NSMaxX(b) - 140, 14, 120, 12);
     _hud.hidden = NO;
 }
 
@@ -656,6 +644,12 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
     }
     else if (_optionsSel == kActCount + 1)
     {
+        _showHUD = !_showHUD;
+        gibson_settings_set(kHUDKey, _showHUD ? "yes" : "no");
+        [self reloadSettings];
+    }
+    else if (_optionsSel == kActCount + 2)
+    {
         for (int i = 0; i < kActCount; ++i)
         {
             _bindings[i] = kActDefaults[i];
@@ -663,6 +657,8 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
         }
         _word = kWordDefault;
         gibson_settings_set(kWordKey, _word.UTF8String);
+        _showHUD = YES;
+        gibson_settings_set(kHUDKey, "yes");
         [self reloadSettings];
     }
     else
@@ -859,10 +855,6 @@ static const CGFloat kRowH = 30, kPad = 18, kTitleH = 30, kFooterH = 18;
             _pendingTurn = kTurnLeft;
         else if ([name isEqualToString:_bindings[kActRight]])
             _pendingTurn = kTurnRight;
-        else if ([name isEqualToString:_bindings[kActBack]])
-            _pendingTurn = kTurnBack;
-        else if ([name isEqualToString:_bindings[kActStraight]])
-            _pendingTurn = kTurnStraight;
     }
     os_unfair_lock_unlock(&_lock);
 }
@@ -1183,6 +1175,7 @@ static const float kHostDim = 0.7f;   // how much the host tower's own glow drop
     case kDriveApproach:
     {
         const double x = std::min(1.0, el / _approachT);
+        _approachX = (float)x;
         const double c = _approachC, a = c - 2.0, b = 3.0 - 2.0 * c;
         const double prev = _s;
         _s = _approachS0 + _approachD * ((a * x + b) * x + c) * x;
@@ -1250,13 +1243,28 @@ static const float kHostDim = 0.7f;   // how much the host tower's own glow drop
         return NO;
     }
 
-    /* Dim the host tower while the file is up; bring it back as we leave. */
+    /* The host tower turns as we fly towards it: from an ordinary tower, its
+       tint darkens through the approach, and its listings fade in a little
+       behind. Both go back as we leave. */
     const bool showing = _drive == kDriveApproach || _drive == kDrivePush || _drive == kDriveHold;
-    _hostDim += ((showing ? 1.f : 0.f) - _hostDim) * (1.f - std::exp(-dt / 0.6f));
+    float tint = 0, lists = 0;
+    if (_drive == kDriveApproach)
+    {
+        tint = gibson_smooth(0.15f, 0.75f, _approachX);
+        lists = gibson_smooth(0.35f, 0.9f, _approachX);
+    }
+    else if (showing)
+        tint = lists = 1;
+    const float follow = 1.f - std::exp(-dt / (showing ? 0.25f : 0.6f));
+    _hostDim += (tint - _hostDim) * follow;
+    _listFade += (lists - _listFade) * follow;
+    const bool gone = !showing && _hostDim < 0.01f && _listFade < 0.01f;
+    if (_column)
+        _column.presence = _listFade;
     if (_hostTower)
     {
         _hostTower.opacity = 1.f - kHostDim * _hostDim;
-        if (!showing && _hostDim < 0.01f)
+        if (gone)
         {
             _hostTower.opacity = 1;
             _hostTower = nil;
@@ -1266,8 +1274,11 @@ static const float kHostDim = 0.7f;   // how much the host tower's own glow drop
     {
         _hostDecor.opacity = _hostDim;
         for (GibsonGarbageColumn *list in _decoys)
+        {
+            list.presence = _listFade;
             [list updateAtTime:time];
-        if (!showing && _hostDim < 0.01f)
+        }
+        if (gone)
         {
             [_hostDecor removeFromParentNode];
             _hostDecor = nil;

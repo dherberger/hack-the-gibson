@@ -5,10 +5,9 @@
 
 /* The garbage file's sound effects, synthesized (nothing sampled), after
  * measurements of the film's:
- *   select  0.42 s: 11 gated bursts (17 ms on, every 40 ms) of an inharmonic
- *           chord at ~1.8 / 4.4 / 4.6 / 5.3 / 5.9 / 8.9 kHz
- *   pulse   a higher gated chord (~4.1 / 6.2 / 7.0 / 7.9 kHz) on each lit
- *           half of the blink
+ *   select  0.42 s: a harsh 25 Hz trill between ~1.8 and ~4.5 kHz beeps
+ *   pulse   a higher gated chord (~2.4-7.9 kHz), ~0.83 s, on each lit half
+ *           of the blink
  * Safe to call from any thread. Volume: `sfx_volume` in config.txt (0-1,
  * default 0.6). */
 @interface GibsonSFX : NSObject

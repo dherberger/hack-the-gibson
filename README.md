@@ -178,19 +178,22 @@ right while the flythrough carries on behind it; use ↑ ↓ and Return to choos
 
 | Key | What it does |
 |---|---|
-| `W` `A` `S` `D` | Choose the next corner: straight on, left, turn around, right. The choice waits for the next intersection. |
-| `U` / `N` | Hold to climb / dive, up over the rooftops and back down. |
+| `A` / `D` | Turn left / right at the next corner (the choice waits for the intersection); otherwise you carry straight on. |
+| `W` / `S` | Hold to climb / dive, up over the rooftops and back down. |
 | type `garbage` | Slow down and fly up to a tower to show the garbage file, as in the film: a scrolling column of directories stops on GARBAGE, which opens the CONFIDENTIAL FILES panel. |
 | `Q` | Leave the garbage file and carry on. |
 | `Esc` | Exit. |
 
 The garbage file has its own sound, synthesized after the film's: a
-stuttering beep as GARBAGE is selected, and a pulse on each blink. Set the
+harsh, stuttering beep as GARBAGE is selected, and a pulse on each slow blink. Set the
 volume with `sfx_volume` in `config.txt`.
 
-**Options** changes any of these keys, and the word. They're saved in
-`config.txt` as `key_left`, `key_right`, `key_straight`, `key_back`, `key_up`,
-`key_down`, `key_leave_file` and `garbage_word`.
+A tiny, faint readout in the bottom-right corner shows the next corner and
+your altitude (or the key that leaves the file).
+
+**Options** changes any of these keys, the word, and whether that readout
+shows. They're saved in `config.txt` as `key_up`, `key_left`, `key_down`,
+`key_right`, `key_leave_file`, `garbage_word` and `show_hud`.
 
 ### Fonts
 

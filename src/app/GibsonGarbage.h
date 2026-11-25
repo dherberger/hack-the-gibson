@@ -40,6 +40,9 @@
 /* The column starts hidden (it scrolls all the same); show it, fading in. */
 @property (nonatomic, readonly) BOOL revealed;
 - (void)revealAtTime:(NSTimeInterval)time;
+/* 0-1, multiplies the reveal: lets the game fade it in with its approach.
+ * Default 1. */
+@property (nonatomic) float presence;
 /* Begin slowing down; the column settles on GARBAGE shortly after. */
 - (void)stopAtTime:(NSTimeInterval)time;
 - (void)fadeOutAtTime:(NSTimeInterval)time;

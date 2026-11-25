@@ -226,6 +226,7 @@ typedef NS_ENUM(int, GibsonColumnPhase) { kScrolling, kStopping, kStopped };
     _node.simdOrientation = simd_quaternion(std::atan2(normal.x, normal.z), simd_make_float3(0, 1, 0));
     _node.opacity = 0;
     _node.hidden = YES;
+    _presence = 1;
     [parent addChildNode:_node];
 
 
@@ -359,7 +360,7 @@ typedef NS_ENUM(int, GibsonColumnPhase) { kScrolling, kStopping, kStopped };
         }
     }
     else if (_revealed)
-        _node.opacity = std::min(1.0, (time - _revealTime) / kFadeIn);
+        _node.opacity = std::min(1.0, (time - _revealTime) / kFadeIn) * _presence;
 
     if (_phase == kScrolling)
     {
@@ -393,13 +394,13 @@ typedef NS_ENUM(int, GibsonColumnPhase) { kScrolling, kStopping, kStopped };
     bool off = false;
     if (since >= kBlinkStart)
     {
-        /* As in the clip: a long first beat (dark 0.55 s, lit 0.4 s), then a
-           steady ~1.3 Hz blink. */
+        /* A long first beat (dark 0.55 s, lit 0.6 s), then a slow, steady
+           blink: lit 0.85 s of every 1.3 s (slower than the film's ~1.3 Hz). */
         const double b = since - kBlinkStart;
-        if (b < 0.95)
+        if (b < 1.15)
             off = b < 0.55;
         else
-            off = std::fmod(b - 0.95, 0.75) < 0.32;
+            off = std::fmod(b - 1.15, 1.3) < 0.45;
     }
     [self showFrame:off ? 5 : boxes];
 }
