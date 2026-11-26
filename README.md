@@ -181,12 +181,18 @@ right while the flythrough carries on behind it; use ↑ ↓ and Return to choos
 | `A` / `D` | Turn left / right at the next corner (the choice waits for the intersection); otherwise you carry straight on. |
 | `W` / `S` | Hold to climb / dive, up over the rooftops and back down. |
 | type `garbage` | Slow down and fly up to a tower to show the garbage file, as in the film: a scrolling column of directories stops on GARBAGE, which opens the CONFIDENTIAL FILES panel. |
-| `Q` | Leave the garbage file and carry on. |
+| `Q` | Leave the garbage file and carry on; otherwise, back to the title screen (the flight carries on behind it, and **Start Game** picks up from there). |
 | `Esc` | Exit. |
 
 The garbage file has its own sound, synthesized after the film's: a
 harsh, stuttering beep as GARBAGE is selected, and a pulse on each slow blink. Set the
 volume with `sfx_volume` in `config.txt`.
+
+With several displays the game fills them all, like the screensaver: one
+view across them (`span_displays`, placed with **Arrange Displays…**) or the
+same picture on each. The menus and readout stay on the primary display.
+When the view spans displays, the garbage file is framed on one of them,
+picked at random, so it's never cut by a bezel.
 
 A tiny, faint readout in the bottom-right corner shows the next corner and
 your altitude (or the key that leaves the file).

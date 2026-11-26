@@ -34,7 +34,7 @@ static const char *const kActKeys[kActCount] = {
 };
 static NSString *const kActDefaults[kActCount] = { @"w", @"a", @"s", @"d", @"q" };
 static NSString *const kActLabels[kActCount] = {
-    @"CLIMB", @"TURN LEFT", @"DIVE", @"TURN RIGHT", @"LEAVE THE FILE",
+    @"CLIMB", @"TURN LEFT", @"DIVE", @"TURN RIGHT", @"LEAVE FILE / MENU",
 };
 static const char *const kWordKey = "garbage_word";
 static NSString *const kWordDefault = @"garbage";
@@ -112,6 +112,13 @@ static float gibson_smooth(float e0, float e1, float x)
     return t * t * (3.f - 2.f * t);
 }
 
+/* One display's slice of a spanned view, as the render thread needs it to
+   frame the garbage file on that display alone. */
+struct GibsonScreenView {
+    simd_quatf orientation;     // its camera, relative to the camera rig
+    float m11, m22, m31, m32;   // its (off-axis) projection
+};
+
 struct GibsonPose {
     simd_float3 pos;
     float yaw;     // heading: forward = (sin yaw, 0, cos yaw)
@@ -129,8 +136,16 @@ static GibsonPose gibson_mix(const GibsonPose &a, const GibsonPose &b, float w)
     return p;
 }
 
+static simd_quatf gibson_pose_orientation(const GibsonPose &p);
+
 /* Same framing as GibsonSCNCamera's -aimWithForward:up:position:. */
 static void gibson_apply_pose(SCNNode *camera, const GibsonPose &p)
+{
+    camera.simdPosition = p.pos;
+    camera.simdOrientation = gibson_pose_orientation(p);
+}
+
+static simd_quatf gibson_pose_orientation(const GibsonPose &p)
 {
     const simd_float3 f = simd_make_float3(std::sin(p.yaw) * std::cos(p.pitch), std::sin(p.pitch),
                                            std::cos(p.yaw) * std::cos(p.pitch));
@@ -143,8 +158,7 @@ static void gibson_apply_pose(SCNNode *camera, const GibsonPose &p)
         x = simd_cross(simd_make_float3(1, 0, 0), z);
     x = simd_normalize(x);
     const simd_float3 y = simd_normalize(simd_cross(z, x));
-    camera.simdPosition = p.pos;
-    camera.simdOrientation = simd_quaternion(simd_matrix(x, y, z));
+    return simd_quaternion(simd_matrix(x, y, z));
 }
 
 static const float kCruise = 18.f;           // units per second, about the flythrough's pace
@@ -324,6 +338,17 @@ static const CGFloat kRowH = 30, kPad = 14, kTitleH = 42;
     GibsonGameWindow *_window;
     GibsonGameContentView *_content;
     GibsonGameSCNView *_scnView;
+    /* Every other display: a window showing the flight, with no menu or HUD
+       (those stay on the primary display). */
+    NSMutableArray<NSWindow *> *_extraWindows;
+    NSMutableArray<GibsonGameSCNView *> *_views;     // _scnView first
+    NSMutableArray<NSScreen *> *_viewScreens;        // each view's display
+    NSMutableArray<SCNNode *> *_viewCams;            // spanning cameras we made
+    id _screensObserver;
+    std::vector<GibsonScreenView> _screenViews;   // spanning only; under _lock
+    // render thread: the garbage file framed on one display
+    simd_quatf _focusTurn;   // rig turn that squares that display up to the file
+    float _focusW;           // how far it's applied, 0-1
     GibsonMenuView *_menu;
     GibsonHUDView *_hud;
     NSTimer *_hudTimer;
@@ -442,6 +467,20 @@ static const CGFloat kRowH = 30, kPad = 14, kTitleH = 42;
     [_world resetClock];
     _world.cameraDriver = self;
     [_content addSubview:_scnView];
+    _views = [NSMutableArray arrayWithObject:_scnView];
+    _viewScreens = [NSMutableArray arrayWithObject:screen];
+    _viewCams = [NSMutableArray array];
+    _extraWindows = [NSMutableArray array];
+    for (NSScreen *other in NSScreen.screens)
+        if (other != screen)
+            [self addWindowOnScreen:other];
+    [self updateProjections];
+    __weak GibsonGameController *weakObserver = self;
+    _screensObserver = [[NSNotificationCenter defaultCenter]
+        addObserverForName:NSApplicationDidChangeScreenParametersNotification object:nil
+                     queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) {
+                         [weakObserver updateProjections];
+                     }];
 
     _menu = [[GibsonMenuView alloc] initWithFrame:NSZeroRect];
     _menu.autoresizingMask = NSViewMinXMargin | NSViewMaxYMargin;
@@ -455,6 +494,8 @@ static const CGFloat kRowH = 30, kPad = 14, kTitleH = 42;
     [self refreshMenu];
 
     [NSApp setPresentationOptions:NSApplicationPresentationHideDock | NSApplicationPresentationHideMenuBar];
+    for (NSWindow *w in _extraWindows)
+        [w orderFront:nil];
     [_window makeKeyAndOrderFront:nil];
     [_window makeFirstResponder:_content];
     [NSApp activateIgnoringOtherApps:YES];
@@ -467,6 +508,63 @@ static const CGFloat kRowH = 30, kPad = 14, kTitleH = 42;
     _hudTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *t) {
         [weakSelf refreshHUD];
     }];
+}
+
+/* A plain window filling another display with a view of the same world. It
+   never takes the keyboard or the mouse, so the keys stay with the main one. */
+- (void)addWindowOnScreen:(NSScreen *)screen
+{
+    NSWindow *w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 800, 600)
+                                              styleMask:NSWindowStyleMaskBorderless
+                                                backing:NSBackingStoreBuffered
+                                                  defer:NO];
+    w.releasedWhenClosed = NO;
+    w.level = NSMainMenuWindowLevel + 1;
+    w.backgroundColor = NSColor.blackColor;
+    w.opaque = YES;
+    w.ignoresMouseEvents = YES;
+    [w setFrame:screen.frame display:NO];
+    GibsonGameSCNView *view = [[GibsonGameSCNView alloc]
+        initWithFrame:NSMakeRect(0, 0, screen.frame.size.width, screen.frame.size.height)];
+    view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [GibsonSCNScene configureView:view preview:NO mediaURL:_media];
+    w.contentView = view;
+    [_extraWindows addObject:w];
+    [_views addObject:view];
+    [_viewScreens addObject:screen];
+}
+
+/* As in the screensaver: with span_displays (the default) the displays are
+   windows onto one view, placed by Arrange Displays; otherwise each shows
+   the same picture. */
+- (void)updateProjections
+{
+    for (SCNNode *cam in _viewCams)
+        [cam removeFromParentNode];
+    [_viewCams removeAllObjects];
+    std::vector<GibsonScreenView> views;
+    const BOOL span = _views.count > 1 && NSScreen.screens.count > 1 && gibson_span_displays();
+    for (NSUInteger i = 0; i < _views.count; ++i)
+    {
+        SCNMatrix4 projection;
+        simd_quatf orientation;
+        if (span && [NSScreen.screens containsObject:_viewScreens[i]] &&
+            [GibsonSCNScene wallProjection:&projection orientation:&orientation forScreen:_viewScreens[i]])
+        {
+            SCNNode *cam = [_world makeViewCameraNode];
+            cam.camera.projectionTransform = projection;
+            cam.simdOrientation = orientation;
+            _views[i].pointOfView = cam;
+            [_viewCams addObject:cam];
+            views.push_back({ orientation, (float)projection.m11, (float)projection.m22, (float)projection.m31,
+                              (float)projection.m32 });
+        }
+        else
+            _views[i].pointOfView = _world.cameraNode;
+    }
+    os_unfair_lock_lock(&_lock);
+    _screenViews = views;
+    os_unfair_lock_unlock(&_lock);
 }
 
 /* Development: GIBSON_GAME_DEMO=1 plays itself (start, a left turn, the
@@ -518,7 +616,21 @@ static const CGFloat kRowH = 30, kPad = 14, kTitleH = 42;
     [[GibsonSFX shared] stop];
     [NSCursor unhide];
     [NSApp setPresentationOptions:NSApplicationPresentationDefault];
-    _scnView.playing = NO;
+    if (_screensObserver)
+        [[NSNotificationCenter defaultCenter] removeObserver:_screensObserver];
+    _screensObserver = nil;
+    for (GibsonGameSCNView *v in _views)
+        v.playing = NO;
+    for (SCNNode *cam in _viewCams)
+        [cam removeFromParentNode];
+    [_viewCams removeAllObjects];
+    for (NSWindow *w in _extraWindows)
+    {
+        [w orderOut:nil];
+        [w close];
+    }
+    [_extraWindows removeAllObjects];
+    [_views removeAllObjects];
     [_window orderOut:nil];
     [_window close];
     if (_onExit)
@@ -631,6 +743,25 @@ static const CGFloat kRowH = 30, kPad = 14, kTitleH = 42;
     default:
         [self exitGame];
     }
+}
+
+/* Q while flying (outside the file): back to the title screen. The flight
+   carries on along the streets behind it, hands off, and Start Game takes
+   over again from wherever it has got to. */
+- (void)returnToTitle
+{
+    if (_mode != kModePlaying)
+        return;
+    [_typed setString:@""];
+    [_swallowed removeAllObjects];
+    os_unfair_lock_lock(&_lock);
+    _climb = _dive = NO;
+    _pendingTurn = kTurnNone;
+    os_unfair_lock_unlock(&_lock);
+    _mode = kModeTitle;
+    _titleSel = 0;
+    [self refreshMenu];
+    [self refreshHUD];
 }
 
 - (void)activateOption
@@ -844,6 +975,11 @@ static const CGFloat kRowH = 30, kPad = 14, kTitleH = 42;
 
 - (void)control:(NSString *)name down:(BOOL)down
 {
+    if (down && [name isEqualToString:_bindings[kActLeave]])
+    {
+        [self returnToTitle];
+        return;
+    }
     os_unfair_lock_lock(&_lock);
     if ([name isEqualToString:_bindings[kActUp]])
         _climb = down;
@@ -1082,15 +1218,42 @@ static const float kHostDim = 0.7f;   // how much the host tower's own glow drop
     const simd_float3 normal = simd_make_float3((float)-side.x, 0, (float)-side.y);
     const simd_float3 faceP = simd_make_float3((float)face.x, kColumnY, (float)face.y);
 
+    const float yaw = std::atan2((float)side.x, (float)side.y);
+    const simd_float3 fileP = faceP + normal * 0.15f;
+
     /* Back off until the column fills ~85% of the view's height. */
-    const float h = [GibsonGarbageColumn heightForWidth:kColumnWidth];
-    const float fov = 72.f * (float)M_PI / 180.f;
-    const float dist = h / (0.85f * 2.f * std::tan(fov / 2.f));
+    float width = kColumnWidth;
+    float dist = [GibsonGarbageColumn heightForWidth:width] / (0.85f * 2.f * std::tan(36.f * (float)M_PI / 180.f));
+    simd_float3 endPos = fileP + normal * dist;
+    _focusTurn = simd_quaternion(0.f, simd_make_float3(0, 1, 0));
+
+    /* Spanning several displays: frame the file on one of them, picked at
+       random, clear of the bezels. Turn the rig so that display's camera
+       faces the file squarely, and shift it so the file sits in the middle
+       of that display's (off-axis) view. A display sees less than the whole
+       wall, so a fitted distance can land past the far side of the street:
+       keep the camera in the street and make the file smaller instead. */
+    os_unfair_lock_lock(&_lock);
+    const std::vector<GibsonScreenView> views = _screenViews;
+    os_unfair_lock_unlock(&_lock);
+    if (!views.empty())
+    {
+        const GibsonScreenView &v = views[arc4random_uniform((uint32_t)views.size())];
+        const float spanH = 2.f / v.m22, spanW = 2.f / v.m11;   // view extent per unit of depth
+        const float fit = std::max([GibsonGarbageColumn heightForWidth:width] / (0.85f * spanH),
+                                   width / (0.9f * spanW));
+        dist = std::min(fit, 11.5f);
+        width *= dist / fit;
+        GibsonPose facing = { fileP, yaw, 0, 0 };
+        const simd_float3 centreRay = simd_make_float3(v.m31 / v.m11, v.m32 / v.m22, -1.f);
+        endPos = fileP - simd_act(gibson_pose_orientation(facing), centreRay * dist);
+        _focusTurn = simd_inverse(v.orientation);
+    }
 
     _column = [[GibsonGarbageColumn alloc] initWithParent:_world.worldRoot
-                                                   center:faceP + normal * 0.15f
+                                                   center:fileP
                                                    normal:normal
-                                                    width:kColumnWidth
+                                                    width:width
                                                      time:time];
     _mainPulses = 0;
     _mainOpen = NO;
@@ -1098,14 +1261,14 @@ static const float kHostDim = 0.7f;   // how much the host tower's own glow drop
     [self decorateTowerAt:centre mainNormal:normal time:time];
     _hostTower = [_world towerNodeAtX:(float)centre.x z:(float)centre.y];
     _columnStopped = NO;
-    _endPose.pos = faceP + normal * dist;
-    _endPose.yaw = std::atan2((float)side.x, (float)side.y);
+    _endPose.pos = endPos;
+    _endPose.yaw = yaw;
     _endPose.pitch = 0;
     _endPose.bank = 0;
     /* The fly-in ends a little further back (still clear of the opposite
        tower, 15.4 from this face), then eases in. */
     _panPose = _endPose;
-    _panPose.pos = faceP + normal * std::min(dist * 1.3f, 12.5f);
+    _panPose.pos = endPos + normal * std::max(0.f, std::min(dist * 1.3f, 12.5f) - dist);
 
     _approachS0 = _s;
     _approachD = (_cum[seg] + GIBSON_CITY_BLOCK / 2) - _s;
@@ -1301,6 +1464,20 @@ static const float kHostDim = 0.7f;   // how much the host tower's own glow drop
     if (_column.finished)
         _column = nil;
     gibson_apply_pose(camera, pose);
+
+    /* Square the chosen display up to the file (spanning only): in with the
+       turn towards it, out as we leave. */
+    float focus = 0;
+    if (_drive == kDriveApproach)
+        focus = gibson_smooth(0.55f, 1.f, _approachX);
+    else if (_drive == kDrivePush || _drive == kDriveHold)
+        focus = 1;
+    else if (_drive == kDriveLeaving)
+        focus = 1.f - gibson_smooth(0.f, 1.f, (float)(el / 1.6));
+    _focusW = focus;
+    if (_focusW > 1e-4f)
+        camera.simdOrientation = simd_mul(camera.simdOrientation,
+                                          simd_slerp(simd_quaternion(0.f, simd_make_float3(0, 1, 0)), _focusTurn, _focusW));
     os_unfair_lock_lock(&_lock);
     _hudAlt = pose.pos.y;
     os_unfair_lock_unlock(&_lock);
