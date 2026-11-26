@@ -1,0 +1,1065 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inside The Gibson</title>
+<meta name="description" content="An offline walkthrough of how The Gibson screensaver and the Hack The Gibson game are built.">
+<style>
+:root {
+  --bg: #05080d;
+  --panel: #0b1119;
+  --panel-2: #0f1823;
+  --line: #1c2a3a;
+  --ink: #d7e6f2;
+  --ink-dim: #8aa0b4;
+  --ink-faint: #5d7286;
+  --cyan: #7fe9ff;
+  --cyan-dim: #3fb6d6;
+  --blue: #4f7dff;
+  --violet: #9a7dff;
+  --warn: #ffcf6b;
+  --code-bg: #070c12;
+  --kw: #7fb4ff;
+  --str: #9be7c4;
+  --com: #5f7a8f;
+  --num: #ffc58a;
+  --glow: 0 0 18px rgba(127, 233, 255, 0.25);
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #f4f7fa;
+  --panel: #ffffff;
+  --panel-2: #eef3f8;
+  --line: #d6e0ea;
+  --ink: #142230;
+  --ink-dim: #4a5f73;
+  --ink-faint: #7a8c9d;
+  --cyan: #0b7fa3;
+  --cyan-dim: #2a95b5;
+  --blue: #2f5fe0;
+  --violet: #6a4fd8;
+  --warn: #9a6400;
+  --code-bg: #f1f5f9;
+  --kw: #2b5fc9;
+  --str: #1f7a52;
+  --com: #7a8c9d;
+  --num: #a5560c;
+  --glow: none;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.62 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--cyan); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Monaco, monospace; }
+code { font-size: 0.88em; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 0.05em 0.35em; }
+pre {
+  background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: 14px 16px; overflow-x: auto; font-size: 13px; line-height: 1.55; margin: 14px 0;
+}
+pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+.k { color: var(--kw); } .s { color: var(--str); } .c { color: var(--com); font-style: italic; } .n { color: var(--num); }
+
+.layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); max-width: 1240px; margin: 0 auto; }
+nav.toc {
+  position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: 28px 18px 28px 22px;
+  border-right: 1px solid var(--line); font-size: 13.5px;
+}
+nav.toc .brand { font-weight: 800; letter-spacing: 0.14em; font-size: 12px; color: var(--cyan); text-transform: uppercase; margin-bottom: 18px; text-shadow: var(--glow); }
+nav.toc ol { list-style: none; margin: 0; padding: 0; counter-reset: toc; }
+nav.toc li { counter-increment: toc; }
+nav.toc a { display: block; padding: 5px 8px; border-radius: 6px; color: var(--ink-dim); }
+nav.toc a::before { content: counter(toc, decimal-leading-zero) "  "; color: var(--ink-faint); font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+nav.toc a:hover, nav.toc a.active { background: var(--panel-2); color: var(--ink); text-decoration: none; }
+.theme-btn { margin-top: 22px; background: var(--panel-2); color: var(--ink-dim); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+
+main { padding: 0 44px 120px; min-width: 0; }
+header.hero { padding: 64px 0 34px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.eyebrow { font-family: ui-monospace, Menlo, monospace; font-size: 12px; letter-spacing: 0.18em; color: var(--cyan-dim); text-transform: uppercase; }
+h1 { font-size: 46px; line-height: 1.08; margin: 10px 0 16px; letter-spacing: -0.01em; }
+h1 span { color: var(--cyan); text-shadow: var(--glow); }
+.lede { font-size: 19px; color: var(--ink-dim); max-width: 720px; margin: 0; }
+section { padding: 46px 0 8px; border-bottom: 1px solid var(--line); }
+section:last-of-type { border-bottom: 0; }
+h2 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.005em; }
+h2 .num { font-family: ui-monospace, Menlo, monospace; font-size: 14px; color: var(--cyan-dim); margin-right: 10px; vertical-align: 4px; }
+h3 { font-size: 18.5px; margin: 30px 0 6px; }
+p { max-width: 760px; }
+.sub { color: var(--ink-dim); margin-top: 0; }
+ul, ol { max-width: 760px; padding-left: 22px; }
+li { margin: 4px 0; }
+
+.callout { border: 1px solid var(--line); border-left: 3px solid var(--cyan-dim); background: var(--panel); border-radius: 8px; padding: 12px 16px; margin: 18px 0; max-width: 780px; }
+.callout.warn { border-left-color: var(--warn); }
+.callout b { color: var(--ink); }
+.callout p { margin: 4px 0; }
+
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 18px 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.card h4 { margin: 0 0 6px; font-size: 15px; }
+.card p { margin: 0; color: var(--ink-dim); font-size: 14.5px; }
+.card .path { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--cyan-dim); }
+
+figure { margin: 22px 0; }
+figure .frame { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; overflow-x: auto; }
+figcaption { font-size: 13.5px; color: var(--ink-faint); margin-top: 8px; max-width: 760px; }
+svg text { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; }
+svg .mono { font-family: ui-monospace, Menlo, monospace; }
+.shots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 26px 0 4px; }
+.shots img { width: 100%; border-radius: 8px; border: 1px solid var(--line); display: block; aspect-ratio: 16/10; object-fit: cover; background: #000; }
+
+table { border-collapse: collapse; width: 100%; max-width: 860px; font-size: 14px; margin: 14px 0; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--ink-dim); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; }
+td code { white-space: nowrap; }
+td.r { text-align: right; font-family: ui-monospace, Menlo, monospace; color: var(--ink-faint); }
+
+details { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin: 12px 0; max-width: 900px; }
+details summary { cursor: pointer; padding: 10px 14px; font-weight: 600; font-size: 14.5px; }
+details summary .file { font-family: ui-monospace, Menlo, monospace; font-weight: 400; color: var(--cyan-dim); font-size: 12.5px; margin-left: 8px; }
+details > div { padding: 0 14px 6px; }
+details pre { margin-top: 0; }
+
+.demo { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin: 20px 0; max-width: 900px; }
+.demo canvas { width: 100%; display: block; border-radius: 6px; background: #03060a; }
+.demo .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; font-size: 13.5px; color: var(--ink-dim); }
+.demo button { background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+.demo button:hover { border-color: var(--cyan-dim); }
+.demo button.on { border-color: var(--cyan); color: var(--cyan); }
+.demo .readout { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; margin-left: auto; }
+kbd { font-family: ui-monospace, Menlo, monospace; font-size: 12px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--panel-2); }
+
+.timeline { list-style: none; padding: 0; border-left: 2px solid var(--line); margin-left: 6px; }
+.timeline li { position: relative; padding: 4px 0 12px 20px; }
+.timeline li::before { content: ""; position: absolute; left: -7px; top: 11px; width: 12px; height: 12px; border-radius: 50%; background: var(--bg); border: 2px solid var(--cyan-dim); }
+.timeline .when { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--ink-faint); }
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  nav.toc { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 16px; }
+  nav.toc ol { columns: 2; }
+  main { padding: 0 16px 80px; }
+  h1 { font-size: 34px; }
+  .shots { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="toc" aria-label="Contents">
+  <div class="brand">Inside The Gibson</div>
+  <ol>
+    <li><a href="#overview">The big picture</a></li>
+    <li><a href="#build">Build and ship</a></li>
+    <li><a href="#city">Building the city</a></li>
+    <li><a href="#look">The film look</a></li>
+    <li><a href="#flight">The flight path</a></li>
+    <li><a href="#frame">One frame, start to finish</a></li>
+    <li><a href="#host">Living inside macOS</a></li>
+    <li><a href="#wall">Many displays, one view</a></li>
+    <li><a href="#game">Hack The Gibson</a></li>
+    <li><a href="#garbage">The garbage file</a></li>
+    <li><a href="#sound">Music and sound</a></li>
+    <li><a href="#settings">Settings</a></li>
+    <li><a href="#tools">Tools and tricks</a></li>
+    <li><a href="#map">Code map</a></li>
+    <li><a href="#history">How it got here</a></li>
+  </ol>
+  <button class="theme-btn" id="themeBtn" type="button">Light / dark</button>
+</nav>
+
+<main>
+<header class="hero">
+  <div class="eyebrow">A walkthrough of the code · works offline</div>
+  <h1>Inside <span>The Gibson</span></h1>
+  <p class="lede">How a 1995 film's most famous fake computer became a native macOS screensaver, a multi-display video wall and a small game, in about ten thousand lines of Objective-C++, with no game engine.</p>
+  <div class="shots">
+    <img src="../media/screenshot1.png" alt="Overhead shot of the glowing city">
+    <img src="../media/screenshot2.png" alt="Low shot down a canyon of towers">
+    <img src="../media/screenshot3.png" alt="The camera banking through a turn">
+  </div>
+</header>
+
+<!-- ============================================================ -->
+<section id="overview">
+  <h2><span class="num">01</span>The big picture</h2>
+  <p class="sub">One shared 3D world, three ways in.</p>
+  <p>Everything you see, whether the screensaver, the Preview window, the Arrange Displays editor or the game, is the same SceneKit scene: a 60 × 60 grid of glass towers over a circuit-board floor. What differs is who drives the camera and which window shows it.</p>
+
+  <figure>
+    <div class="frame">
+    <svg viewBox="0 0 900 470" width="100%" role="img" aria-label="Architecture diagram">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink-faint)"/></marker>
+      </defs>
+      <!-- processes -->
+      <rect x="10" y="10" width="420" height="200" rx="12" fill="var(--panel-2)" stroke="var(--line)"/>
+      <text x="26" y="36" fill="var(--ink)" font-weight="700" font-size="15">TheGibson.app</text>
+      <text x="26" y="54" fill="var(--ink-faint)" font-size="12">your process: open it from /Applications</text>
+      <rect x="26" y="70" width="122" height="58" rx="8" fill="var(--panel)" stroke="var(--cyan-dim)"/>
+      <text x="87" y="94" text-anchor="middle" fill="var(--ink)" font-size="13" font-weight="600">Settings</text>
+      <text x="87" y="112" text-anchor="middle" fill="var(--ink-faint)" font-size="11">GibsonApp.mm</text>
+      <rect x="158" y="70" width="122" height="58" rx="8" fill="var(--panel)" stroke="var(--cyan-dim)"/>
+      <text x="219" y="94" text-anchor="middle" fill="var(--ink)" font-size="13" font-weight="600">Arrange</text>
+      <text x="219" y="112" text-anchor="middle" fill="var(--ink-faint)" font-size="11">GibsonArrange.mm</text>
+      <rect x="290" y="70" width="126" height="58" rx="8" fill="var(--panel)" stroke="var(--cyan)"/>
+      <text x="353" y="94" text-anchor="middle" fill="var(--cyan)" font-size="13" font-weight="700">The game</text>
+      <text x="353" y="112" text-anchor="middle" fill="var(--ink-faint)" font-size="11">GibsonGame.mm</text>
+      <text x="26" y="156" fill="var(--ink-dim)" font-size="12">+ GibsonGarbage · GibsonSFX · GibsonFonts</text>
+      <text x="26" y="176" fill="var(--ink-dim)" font-size="12">+ Preview window (⌘P)</text>
+      <text x="26" y="196" fill="var(--ink-faint)" font-size="11.5">Contents/PlugIns/ holds the extension ↓</text>
+
+      <rect x="470" y="10" width="420" height="200" rx="12" fill="var(--panel-2)" stroke="var(--line)"/>
+      <text x="486" y="36" fill="var(--ink)" font-weight="700" font-size="15">TheGibson.appex</text>
+      <text x="486" y="54" fill="var(--ink-faint)" font-size="12">macOS's process: launched when the screensaver starts</text>
+      <rect x="486" y="70" width="190" height="58" rx="8" fill="var(--panel)" stroke="var(--cyan-dim)"/>
+      <text x="581" y="94" text-anchor="middle" fill="var(--ink)" font-size="13" font-weight="600">Extension + controller</text>
+      <text x="581" y="112" text-anchor="middle" fill="var(--ink-faint)" font-size="11">GibsonScreenSaver*.mm</text>
+      <rect x="690" y="70" width="186" height="58" rx="8" fill="var(--panel)" stroke="var(--cyan-dim)"/>
+      <text x="783" y="94" text-anchor="middle" fill="var(--ink)" font-size="13" font-weight="600">One view per display</text>
+      <text x="783" y="112" text-anchor="middle" fill="var(--ink-faint)" font-size="11">GibsonSaverView.mm</text>
+      <text x="486" y="156" fill="var(--ink-dim)" font-size="12">+ GibsonMusic (the soundtrack)</text>
+      <text x="486" y="176" fill="var(--ink-dim)" font-size="12">hosted by WallpaperAgent, sandboxed</text>
+
+      <!-- shared core -->
+      <rect x="10" y="250" width="880" height="120" rx="12" fill="var(--panel)" stroke="var(--cyan-dim)" stroke-dasharray="5 4"/>
+      <text x="26" y="276" fill="var(--cyan)" font-weight="700" font-size="14">Shared core, compiled into both</text>
+      <g font-size="12.5">
+        <rect x="26" y="290" width="160" height="62" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="106" y="314" text-anchor="middle" fill="var(--ink)" font-weight="600">GibsonSCNScene</text>
+        <text x="106" y="333" text-anchor="middle" fill="var(--ink-faint)" font-size="11">towers, floor, pulses, tick</text>
+        <rect x="198" y="290" width="160" height="62" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="278" y="314" text-anchor="middle" fill="var(--ink)" font-weight="600">GibsonSCNCamera</text>
+        <text x="278" y="333" text-anchor="middle" fill="var(--ink-faint)" font-size="11">spline flight, bank, grade</text>
+        <rect x="370" y="290" width="160" height="62" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="450" y="314" text-anchor="middle" fill="var(--ink)" font-weight="600">GibsonWall</text>
+        <text x="450" y="333" text-anchor="middle" fill="var(--ink-faint)" font-size="11">multi-display projection</text>
+        <rect x="542" y="290" width="160" height="62" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="622" y="314" text-anchor="middle" fill="var(--ink)" font-weight="600">gibson_settings</text>
+        <text x="622" y="333" text-anchor="middle" fill="var(--ink-faint)" font-size="11">config.txt, plain C++</text>
+        <rect x="714" y="290" width="160" height="62" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="794" y="314" text-anchor="middle" fill="var(--ink)" font-weight="600">fly_path.h</text>
+        <text x="794" y="333" text-anchor="middle" fill="var(--ink-faint)" font-size="11">41 original waypoints</text>
+      </g>
+
+      <!-- media -->
+      <rect x="10" y="400" width="430" height="60" rx="12" fill="var(--panel-2)" stroke="var(--line)"/>
+      <text x="26" y="424" fill="var(--ink)" font-weight="700" font-size="14">media/</text>
+      <text x="26" y="444" fill="var(--ink-dim)" font-size="12">towers.obj · 16 tower textures · room.png floor · pulse.obj · fonts</text>
+      <rect x="460" y="400" width="430" height="60" rx="12" fill="var(--panel-2)" stroke="var(--line)"/>
+      <text x="476" y="424" fill="var(--ink)" font-weight="700" font-size="14">~/Library/Application Support/TheGibson/</text>
+      <text x="476" y="444" fill="var(--ink-dim)" font-size="12">config.txt · music.mp3 · fonts/ (yours, never shipped)</text>
+
+      <path d="M220 210 L220 248" stroke="var(--ink-faint)" marker-end="url(#ar)"/>
+      <path d="M680 210 L680 248" stroke="var(--ink-faint)" marker-end="url(#ar)"/>
+      <path d="M225 370 L225 398" stroke="var(--ink-faint)" marker-end="url(#ar)"/>
+      <path d="M675 370 L675 398" stroke="var(--ink-faint)" marker-end="url(#ar)"/>
+    </svg>
+    </div>
+    <figcaption>Two processes, one codebase. The app and the screensaver extension each build their own copy of the shared core, and both read the same <code>config.txt</code>.</figcaption>
+  </figure>
+
+  <div class="grid2">
+    <div class="card"><h4>SceneKit, not a game engine</h4><p>The scene graph, Metal renderer, HDR bloom and motion blur all come from Apple's SceneKit. The original Irrlicht engine is gone. No dependencies beyond the macOS SDK.</p></div>
+    <div class="card"><h4>Objective-C++</h4><p>AppKit and SceneKit are Objective-C APIs, and the maths (splines, projections, route planning) is plain C++ with <code>simd</code> vectors. <code>.mm</code> files mix the two freely.</p></div>
+    <div class="card"><h4>Plain Makefiles</h4><p>No Xcode project. <code>clang++</code> builds the app, the extension and a few dev tools; the Makefile also signs, installs and registers them.</p></div>
+    <div class="card"><h4>Measured against the film</h4><p>Colours, timings, fonts and sounds were tuned against frames and audio captured from <i>Hackers</i>. Many comments cite what was measured.</p></div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="build">
+  <h2><span class="num">02</span>Build and ship</h2>
+  <p class="sub">From <code>make</code> to the System Settings screensaver list.</p>
+  <p><a href="../src/Makefile">src/Makefile</a> does all the work (the top-level <code>Makefile</code> just forwards to it). The interesting target is <code>install-saver</code>:</p>
+  <ol>
+    <li>Compile the shared core, the app sources and the extension sources with <code>clang++ -fobjc-arc</code> for arm64.</li>
+    <li>Assemble <code>dist/TheGibson.app</code>, with <code>TheGibson.appex</code> inside <code>Contents/PlugIns/</code> and <code>media/</code> copied into the resources.</li>
+    <li>Copy it to <code>/Applications</code> and sign it with the best identity in your keychain (Developer ID, then Apple Development, then ad hoc).</li>
+    <li>Register the extension with <code>pluginkit -a</code>, restart <code>WallpaperAgent</code> so the new build is the one that runs, and remove any old <code>Gibson.saver</code>.</li>
+  </ol>
+  <p>The extension declares itself to macOS through <a href="../src/saver/TheGibson.appex.plist">TheGibson.appex.plist</a>:</p>
+<pre><code>&lt;key&gt;NSExtensionPointIdentifier&lt;/key&gt;  &lt;string&gt;<span class="s">com.apple.screensaver</span>&lt;/string&gt;
+&lt;key&gt;NSExtensionPrincipalClass&lt;/key&gt;   &lt;string&gt;<span class="s">GibsonScreenSaverExtension</span>&lt;/string&gt;
+&lt;key&gt;NSExtensionContextClass&lt;/key&gt;     &lt;string&gt;<span class="s">ScreenSaverExtensionContext</span>&lt;/string&gt;   <span class="c">&lt;!-- without it: black screen --&gt;</span>
+&lt;key&gt;ScreenSaverViewControllerClass&lt;/key&gt; &lt;string&gt;<span class="s">GibsonScreenSaverViewController</span>&lt;/string&gt;</code></pre>
+  <div class="callout">
+    <p><b>Why an extension?</b> Classic <code>.saver</code> bundles run inside Apple's <code>legacyScreenSaver</code> process, which has grown unreliable. Shipping as an ExtensionKit <code>.appex</code> is how Apple's own screensavers work now: The Gibson runs in its own sandboxed process and sits with Apple's savers in System Settings, not under "Other". <code>make legacy-saver</code> still builds the old format.</p>
+  </div>
+  <h3>Other targets worth knowing</h3>
+  <table>
+    <tr><th>Target</th><th>What it does</th></tr>
+    <tr><td><code>make run-app</code></td><td>Opens the freshly built app (settings window) without installing.</td></tr>
+    <tr><td><code>make play</code></td><td>Opens the app straight into the game (<code>--game</code>).</td></tr>
+    <tr><td><code>make scn</code></td><td>A bare preview window, <a href="../src/scenekit/scn_preview.mm">scn_preview</a>, which also renders test shots offscreen.</td></tr>
+    <tr><td><code>make bench</code></td><td>Runs the real saver view full screen on every display and reports CPU, frame rate and memory, with switches to turn effects off one at a time.</td></tr>
+    <tr><td><code>make enable-saver</code></td><td>Sets The Gibson as the active screensaver by editing macOS's wallpaper store (backs it up first).</td></tr>
+  </table>
+</section>
+
+<!-- ============================================================ -->
+<section id="city">
+  <h2><span class="num">03</span>Building the city</h2>
+  <p class="sub"><a href="../src/scenekit/GibsonSCNScene.mm">GibsonSCNScene.mm</a>: 3,600 towers, a floor, 280 light pulses.</p>
+
+  <figure>
+    <div class="frame">
+    <svg viewBox="0 0 900 330" width="100%" role="img" aria-label="Scene graph">
+      <g font-size="12.5">
+        <rect x="370" y="10" width="160" height="40" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="450" y="35" text-anchor="middle" fill="var(--ink)" font-weight="600">scene.rootNode</text>
+
+        <rect x="80" y="90" width="170" height="44" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="165" y="110" text-anchor="middle" fill="var(--ink)" font-weight="600">room (SCNFloor)</text>
+        <text x="165" y="126" text-anchor="middle" fill="var(--ink-faint)" font-size="11">order −5 · circuit texture</text>
+
+        <rect x="520" y="90" width="300" height="44" rx="8" fill="var(--panel)" stroke="var(--cyan)"/>
+        <text x="670" y="110" text-anchor="middle" fill="var(--cyan)" font-weight="700">worldRoot  · scale (1, 1, −1)</text>
+        <text x="670" y="126" text-anchor="middle" fill="var(--ink-faint)" font-size="11">flips Irrlicht's left-handed coordinates</text>
+
+        <g>
+          <rect x="300" y="190" width="120" height="58" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+          <text x="360" y="212" text-anchor="middle" fill="var(--ink)" font-weight="600">lights</text>
+          <text x="360" y="230" text-anchor="middle" fill="var(--ink-faint)" font-size="11">ambient + sun</text>
+          <rect x="432" y="190" width="120" height="58" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+          <text x="492" y="212" text-anchor="middle" fill="var(--ink)" font-weight="600">dark towers</text>
+          <text x="492" y="230" text-anchor="middle" fill="var(--ink-faint)" font-size="11">~half of 3,600</text>
+          <rect x="564" y="190" width="120" height="58" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+          <text x="624" y="212" text-anchor="middle" fill="var(--ink)" font-weight="600">light towers</text>
+          <text x="624" y="230" text-anchor="middle" fill="var(--ink-faint)" font-size="11">the other half</text>
+          <rect x="696" y="190" width="120" height="58" rx="8" fill="var(--panel-2)" stroke="var(--violet)"/>
+          <text x="756" y="212" text-anchor="middle" fill="var(--ink)" font-weight="600">tower-mirror</text>
+          <text x="756" y="230" text-anchor="middle" fill="var(--ink-faint)" font-size="11">scale y −1 · order −10</text>
+          <rect x="828" y="190" width="66" height="58" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+          <text x="861" y="212" text-anchor="middle" fill="var(--ink)" font-weight="600">pulses</text>
+          <text x="861" y="230" text-anchor="middle" fill="var(--ink-faint)" font-size="11">280</text>
+          <rect x="168" y="190" width="120" height="58" rx="8" fill="var(--panel-2)" stroke="var(--cyan-dim)"/>
+          <text x="228" y="212" text-anchor="middle" fill="var(--ink)" font-weight="600">camera rig</text>
+          <text x="228" y="230" text-anchor="middle" fill="var(--ink-faint)" font-size="11">+ per-display cams</text>
+        </g>
+        <path d="M450 50 L165 90 M450 50 L670 90" stroke="var(--ink-faint)" fill="none"/>
+        <path d="M670 134 L228 190 M670 134 L360 190 M670 134 L492 190 M670 134 L624 190 M670 134 L756 190 M670 134 L861 190" stroke="var(--ink-faint)" fill="none"/>
+        <text x="300" y="290" fill="var(--ink-dim)" font-size="12">Each tower is its own node so SceneKit can cull and depth-sort it, but all dark towers share one</text>
+        <text x="300" y="308" fill="var(--ink-dim)" font-size="12">SCNGeometry (and all light towers another). Swapping that geometry's material animates every tower at once.</text>
+      </g>
+    </svg>
+    </div>
+  </figure>
+
+  <h3>The towers</h3>
+  <p>One mesh, <code>media/towers.obj</code>, is loaded with Model I/O and placed 3,600 times on a 30-unit grid, scaled 1.6× wide and 1.265× tall (15% taller than the original). A coin flip picks a "dark" or "light" texture set for each one.</p>
+  <p>The glowing text animates by <b>flipbook</b>: 8 prebuilt materials per tower type, one per texture frame (<code>towers1-1…8.png</code>, <code>towers2-1…8.png</code>). Every 200 ms the shared geometry's material array is pointed at the next frame:</p>
+<pre><code><span class="k">- (void)</span>updateTowersAtTime:(NSTimeInterval)time
+{
+    <span class="k">if</span> (time - _lastTowerSwap &lt; TEXT_ANIM_WAIT)     <span class="c">// 0.200 s</span>
+        <span class="k">return</span>;
+    _lastTowerSwap = time;
+    _towerFrame = (_towerFrame + <span class="n">1</span>) % TOWER_TEXTURE_COUNT;
+    _darkTowers.materials  = @[ _darkTowerMats[_towerFrame] ];
+    _lightTowers.materials = @[ _lightTowerMats[_towerFrame] ];
+    _darkMirror.materials  = _darkTowers.materials;      <span class="c">// the reflection follows</span>
+    _lightMirror.materials = _lightTowers.materials;
+}</code></pre>
+  <div class="callout"><p><b>Why prebuilt materials?</b> Assigning a new image to a live material makes SceneKit re-process the bitmap every swap. Pointing at an already-built material is nearly free. This, plus one node per tower instead of a flattened clone (so off-screen towers get culled), halved the screensaver's CPU use.</p></div>
+
+  <h3>Glass that shifts colour</h3>
+  <p>The tower textures are greyscale; the colour is added by a small Metal <b>shader modifier</b> injected into SceneKit's fragment shader. It mixes electric blue and cyan from three inputs: how edge-on you see the face, a slow wave drifting across the city, and the tower's world position, so neighbours aren't in lockstep. The brightest texels go pale cyan-white like the film's highlights.</p>
+<pre><code><span class="c">// gibson_tower_hue_shader(): runs per pixel on every tower</span>
+float3 gWorld = (scn_frame.inverseViewTransform * float4(_surface.position, <span class="n">1.0</span>)).xyz;
+float gFacing = abs(dot(normalize(_surface.normal), normalize(_surface.view)));
+float gEdgeOn = pow(<span class="n">1.0</span> - gFacing, <span class="n">1.5</span>);
+float gWave   = <span class="n">0.5</span> + <span class="n">0.5</span> * sin(scn_frame.time * <span class="n">0.5</span> + phase + gWorld.x * <span class="n">0.035</span> + gWorld.z * <span class="n">0.045</span>);
+float gMix    = smoothstep(<span class="n">0.15</span>, <span class="n">0.85</span>, <span class="n">0.75</span> * gWave + <span class="n">0.55</span> * gEdgeOn);
+float3 gTint  = mix(float3(<span class="n">0.10</span>, <span class="n">0.32</span>, <span class="n">1.0</span>), float3(<span class="n">0.38</span>, <span class="n">0.88</span>, <span class="n">1.0</span>), gMix);  <span class="c">// blue → cyan</span>
+float gHot    = smoothstep(<span class="n">0.75</span>, <span class="n">1.4</span>, max(_output.color.r, max(_output.color.g, _output.color.b)));
+gTint = mix(gTint, float3(<span class="n">0.70</span>, <span class="n">0.97</span>, <span class="n">1.0</span>), gHot * <span class="n">0.75</span>);
+_output.color.rgb *= gTint;</code></pre>
+
+  <h3>A floor that reflects only through its traces</h3>
+  <p>In the film the floor is dark and opaque, and only the glossy circuit traces mirror the towers. SceneKit's built-in floor reflection can't be masked per pixel, so the code fakes it:</p>
+  <ol>
+    <li>A second copy of every tower hangs <b>upside down under the floor</b> (<code>tower-mirror</code>, y-scale −1), sharing the real towers' materials so it animates too.</li>
+    <li>The floor is drawn over it. Its transparency mask is the trace texture run through a Core Image tone curve: the dark gaps are fully opaque, and the trace cores are at most 27.5% see-through.</li>
+    <li>Fixed rendering orders (mirror −10, floor −5, towers 0) stop SceneKit's distance sort from putting the mirror on top.</li>
+    <li>Mirrored towers beyond 300 units are replaced by "nothing" through a level-of-detail entry with a <code>nil</code> geometry. Through thin traces, distant reflections were invisible anyway, and this halved the GPU's work.</li>
+  </ol>
+
+  <h3>Pulses and fog</h3>
+  <p>280 streaks (<code>pulse.obj</code>, stretched 10× long, additive blending at 4× intensity so they blow out into the bloom) race along the streets at 120–200 units per second and respawn somewhere random when they leave the city. Fog fades everything to black from 480 to 820 units out, so you never see the city's edge.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="look">
+  <h2><span class="num">04</span>The film look</h2>
+  <p class="sub">HDR, bloom, saturation, motion blur, and rendering fewer pixels on purpose.</p>
+  <p>The "grade" lives on the camera (<a href="../src/scenekit/GibsonSCNCamera.mm">GibsonSCNCamera.mm</a>). Materials are unlit (<code>SCNLightingModelConstant</code>) and pushed past 1.0 brightness, so the HDR pipeline's bloom catches the text, edges and pulses:</p>
+<pre><code>cam.fieldOfView = <span class="n">72.0</span>;
+cam.wantsHDR = <span class="k">YES</span>;
+cam.bloomThreshold = <span class="n">0.9</span>;     <span class="c">// only the hottest pixels glow</span>
+cam.bloomIntensity = <span class="n">1.3</span>;
+cam.bloomBlurRadius = <span class="n">18.0</span>;
+cam.saturation = <span class="n">1.35</span>;
+cam.motionBlurIntensity = <span class="n">0.4</span>;</code></pre>
+
+  <h3>The 32 W → 4 W story</h3>
+  <p>Across three displays (two 5K, one built-in), the screensaver first drew about 32 W of GPU power. Three changes brought it to about 4 W:</p>
+  <div class="grid2">
+    <div class="card"><h4>Render fewer pixels: 32 → 8.4 W</h4><p>SceneKit sizes its HDR, bloom and blur buffers from the view's size <i>in points</i>, so lowering the layer's scale did nothing. Instead, the saver view shrinks its <b>bounds</b>: the SCNView inside is smaller in points but still covers the display, and the compositor scales it up. <code>render_scale</code> (default 1 pixel per point) controls it.</p></div>
+    <div class="card"><h4>Cull the fake reflection: 8.4 → 3.9 W</h4><p>The 300-unit limit on mirrored towers described above.</p></div>
+    <div class="card"><h4>Tick once per frame</h4><p>With several displays, every view calls the scene's update. Only the first call in a frame moves anything (see <a href="#frame">§06</a>).</p></div>
+  </div>
+  <p>The film's CG was soft anyway, so rendering below Retina resolution is close to invisible.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="flight">
+  <h2><span class="num">05</span>The flight path</h2>
+  <p class="sub">41 waypoints from the original, flown lower, smoother and in sync with the music.</p>
+  <p><a href="../src/fly_path.h">fly_path.h</a> holds the original Irrlicht flythrough's 41 waypoints. The last two repeat the first, so the camera flies a <b>closed loop</b> over the 39 unique points with a cardinal (Hermite) spline:</p>
+<pre><code><span class="c">// gibson_spline_at_raw(dt): dt is position along the path in waypoint units</span>
+<span class="k">const float</span> h1 =  <span class="n">2</span>*u*u*u - <span class="n">3</span>*u*u + <span class="n">1</span>;     <span class="c">// Hermite basis</span>
+<span class="k">const float</span> h2 = -<span class="n">2</span>*u*u*u + <span class="n">3</span>*u*u;
+<span class="k">const float</span> h3 =    u*u*u - <span class="n">2</span>*u*u + u;
+<span class="k">const float</span> h4 =    u*u*u -   u*u;
+t1 = (p2 - p0) * tightness;     <span class="c">// tangents from the neighbours, tightness 0.5</span>
+t2 = (p3 - p1) * tightness;
+<span class="k">return</span> p1*h1 + p2*h2 + t1*h3 + t2*h4;</code></pre>
+  <div class="grid2">
+    <div class="card"><h4>Fly low</h4><p>The film's camera hugs the street at about a sixth of tower height. <code>gibson_low_flight_y</code> squashes the authored heights (6–30) down to about 4–11, then blends back to full height above 28 so the rooftop swoop still clears the towers.</p></div>
+    <div class="card"><h4>Look ahead, bank into turns</h4><p>The camera sits 150 ms behind the point it looks at. Its yaw rate is measured from the spline's tangent, smoothed, and turned into a roll (<code>bank_strength</code>, capped at <code>bank_max_degrees</code>, lagged by <code>bank_smoothing</code>).</p></div>
+    <div class="card"><h4>Timed to the music</h4><p>The rooftop swoop tops out at path position 16.5. The flight starts at <code>16.5 − swoop_at × speed</code>, so the swoop peaks 33 s in, on a cue in the <i>Hackers</i> suite that plays from the start.</p></div>
+    <div class="card"><h4>Loop, don't ping-pong</h4><p>The path used to reverse at its end, and the look-at point turned around before the camera did. That showed as a "reset" at about 1:29. The cyclic spline fixed it.</p></div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="frame">
+  <h2><span class="num">06</span>One frame, start to finish</h2>
+  <p class="sub">Who calls what, on which thread.</p>
+  <figure>
+    <div class="frame">
+    <svg viewBox="0 0 900 300" width="100%" role="img" aria-label="Frame loop">
+      <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--cyan-dim)"/></marker></defs>
+      <g font-size="12.5">
+        <rect x="10" y="20" width="160" height="62" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="90" y="46" text-anchor="middle" fill="var(--ink)" font-weight="600">SCNView × N</text>
+        <text x="90" y="64" text-anchor="middle" fill="var(--ink-faint)" font-size="11">one per display, 60 fps</text>
+        <rect x="210" y="20" width="200" height="62" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="310" y="42" text-anchor="middle" fill="var(--ink)" font-weight="600">renderer:updateAtTime:</text>
+        <text x="310" y="60" text-anchor="middle" fill="var(--ink-faint)" font-size="11">SceneKit's render thread</text>
+        <rect x="450" y="20" width="200" height="62" rx="8" fill="var(--panel)" stroke="var(--cyan)"/>
+        <text x="550" y="42" text-anchor="middle" fill="var(--cyan)" font-weight="700">tickAtTime:</text>
+        <text x="550" y="60" text-anchor="middle" fill="var(--ink-faint)" font-size="11">first caller per frame wins</text>
+        <rect x="690" y="20" width="200" height="62" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="790" y="42" text-anchor="middle" fill="var(--ink)" font-weight="600">render</text>
+        <text x="790" y="60" text-anchor="middle" fill="var(--ink-faint)" font-size="11">each view: its own camera</text>
+        <path d="M170 51 L208 51" stroke="var(--cyan-dim)" marker-end="url(#ar2)"/>
+        <path d="M410 51 L448 51" stroke="var(--cyan-dim)" marker-end="url(#ar2)"/>
+        <path d="M650 51 L688 51" stroke="var(--cyan-dim)" marker-end="url(#ar2)"/>
+
+        <rect x="330" y="130" width="250" height="56" rx="8" fill="var(--panel-2)" stroke="var(--cyan-dim)"/>
+        <text x="455" y="153" text-anchor="middle" fill="var(--ink)" font-weight="600">cameraDriver?.driveCamera:…</text>
+        <text x="455" y="171" text-anchor="middle" fill="var(--ink-faint)" font-size="11">the game, when it's playing</text>
+        <rect x="610" y="130" width="230" height="56" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="725" y="153" text-anchor="middle" fill="var(--ink)" font-weight="600">else: fly the spline</text>
+        <text x="725" y="171" text-anchor="middle" fill="var(--ink-faint)" font-size="11">GibsonSCNCamera</text>
+        <rect x="330" y="210" width="250" height="44" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="455" y="237" text-anchor="middle" fill="var(--ink)" font-weight="600">tower flipbook (every 0.2 s)</text>
+        <rect x="610" y="210" width="230" height="44" rx="8" fill="var(--panel-2)" stroke="var(--line)"/>
+        <text x="725" y="237" text-anchor="middle" fill="var(--ink)" font-weight="600">move pulses</text>
+        <path d="M550 82 L455 128" stroke="var(--ink-faint)" fill="none"/>
+        <path d="M580 158 L608 158" stroke="var(--ink-faint)" stroke-dasharray="4 3"/>
+        <text x="594" y="150" text-anchor="middle" fill="var(--ink-faint)" font-size="10">NO</text>
+        <path d="M455 186 L455 208" stroke="var(--ink-faint)"/>
+        <path d="M580 232 L608 232" stroke="var(--ink-faint)"/>
+      </g>
+    </svg>
+    </div>
+  </figure>
+<pre><code><span class="k">- (void)</span>tickAtTime:(NSTimeInterval)time
+{
+    <span class="c">/* Every view showing the world calls this once per frame; the first one
+       in a frame moves everything, the rest have nothing to do. */</span>
+    <span class="k">if</span> (time &lt; _lastTime + <span class="n">1.0</span> / <span class="n">240.0</span> &amp;&amp; time != _startTime)
+        <span class="k">return</span>;
+    <span class="k">const float</span> delta = std::min(<span class="n">0.1</span>, time - _lastTime);
+    _lastTime = time;
+
+    id&lt;GibsonCameraDriver&gt; driver = _cameraDriver;
+    <span class="k">if</span> (!driver || ![driver driveCamera:_flyCam.cameraNode atTime:time delta:delta])
+        [_flyCam updateAtTime:time startTime:_startTime];
+    [<span class="k">self</span> updateTowersAtTime:time];
+    [<span class="k">self</span> updatePulses:delta];
+}</code></pre>
+  <p>The <code>GibsonCameraDriver</code> protocol is the seam that made the game possible without touching the screensaver: anything that sets <code>world.cameraDriver</code> gets to place the camera each frame. Return <code>NO</code> and the normal flythrough carries on, which is exactly what the game's title screen does.</p>
+  <p>The world itself is a <b>shared singleton</b> (<code>sharedWorldForPreview:mediaURL:</code>). Every display's view points at the same <code>SCNScene</code>, so the city is built once and moves once per frame, however many displays there are.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="host">
+  <h2><span class="num">07</span>Living inside macOS</h2>
+  <p class="sub">The screensaver host's quirks, as discovered.</p>
+  <p>When the screensaver starts, macOS launches the extension and asks <a href="../src/saver/GibsonScreenSaverViewController.mm">GibsonScreenSaverViewController</a> for a view, once per display. Each gets a <a href="../src/saver/GibsonSaverView.mm">GibsonSaverView</a>, which wraps an <code>SCNView</code> showing the shared world. Much of that file deals with undocumented host behaviour:</p>
+  <ul>
+    <li><b>Never told to stop.</b> The host doesn't call <code>stopAnimation</code> and keeps the process alive between sessions. Rendering starts on <code>viewDidMoveToWindow</code> and the <code>com.apple.screensaver.didstart</code> distributed notification, and stops on <code>willstop</code>/<code>didstop</code> or when the view leaves its window.</li>
+    <li><b>Which display am I on?</b> The view lives in a remote window whose <code>screen</code> is <code>nil</code> on secondary displays. <code>-hostScreen</code> matches the window's origin against the display frames, falling back to a unique size match.</li>
+    <li><b>Born at 0 × 0.</b> The view is attached to a zero-size window and resized later, so it sizes itself by autoresizing, as Apple's own screensavers do.</li>
+    <li><b>The black display.</b> The SCNView's display link follows its window's screen. When the host's flipped coordinates put the window on no screen at all, it never drew. The fix re-homes the window.</li>
+    <li><b>Quiet thumbnails.</b> System Settings' little preview is also a full instance. Music plays only once the view is wider than 400 points.</li>
+  </ul>
+  <div class="callout"><p><b>Debugging a process you can't attach to:</b> everything logs through <code>os_log</code> with subsystem <code>org.hackthegibson.TheGibson</code> and public strings, plus a heartbeat with frame counts. Watch it live with<br><code>log stream --predicate 'subsystem == "org.hackthegibson.TheGibson"'</code></p></div>
+</section>
+
+<!-- ============================================================ -->
+<section id="wall">
+  <h2><span class="num">08</span>Many displays, one view</h2>
+  <p class="sub"><a href="../src/scenekit/GibsonWall.h">GibsonWall.h</a>: each display is a window onto the same scene.</p>
+  <p>With <code>span_displays = yes</code>, the displays act like windows in a wall: a tower crossing a bezel continues on the next display at the same size and angle. Each display renders its own slice of one shared view using a <b>generalised perspective projection</b> (an off-axis frustum through the panel's four corners, seen from a common eye).</p>
+  <figure>
+    <div class="frame">
+    <svg viewBox="0 0 900 300" width="100%" role="img" aria-label="Off-axis frustums">
+      <g font-size="12">
+        <circle cx="450" cy="270" r="7" fill="var(--cyan)"/>
+        <text x="450" y="294" text-anchor="middle" fill="var(--ink-dim)">eye (shared camera rig)</text>
+        <!-- panels -->
+        <line x1="140" y1="90" x2="330" y2="70" stroke="var(--ink)" stroke-width="6"/>
+        <line x1="355" y1="66" x2="545" y2="66" stroke="var(--ink)" stroke-width="6"/>
+        <line x1="570" y1="70" x2="760" y2="90" stroke="var(--ink)" stroke-width="6"/>
+        <text x="235" y="58" text-anchor="middle" fill="var(--ink-dim)">display A (swivelled)</text>
+        <text x="450" y="50" text-anchor="middle" fill="var(--ink-dim)">display B</text>
+        <text x="665" y="58" text-anchor="middle" fill="var(--ink-dim)">display C</text>
+        <!-- frustums -->
+        <path d="M450 270 L140 90 L330 70 Z" fill="var(--blue)" opacity="0.13" stroke="var(--blue)"/>
+        <path d="M450 270 L355 66 L545 66 Z" fill="var(--cyan)" opacity="0.13" stroke="var(--cyan-dim)"/>
+        <path d="M450 270 L570 70 L760 90 Z" fill="var(--violet)" opacity="0.13" stroke="var(--violet)"/>
+        <!-- bezels -->
+        <text x="342" y="98" text-anchor="middle" fill="var(--warn)" font-size="11">bezel</text>
+        <text x="558" y="98" text-anchor="middle" fill="var(--warn)" font-size="11">bezel</text>
+        <text x="70" y="180" fill="var(--ink-faint)" font-size="11.5">Each slice is off-centre:</text>
+        <text x="70" y="196" fill="var(--ink-faint)" font-size="11.5">the eye isn't in front of</text>
+        <text x="70" y="212" fill="var(--ink-faint)" font-size="11.5">the panel's middle.</text>
+        <text x="690" y="180" fill="var(--ink-faint)" font-size="11.5">Gaps between frustums</text>
+        <text x="690" y="196" fill="var(--ink-faint)" font-size="11.5">are the bezels: the scene</text>
+        <text x="690" y="212" fill="var(--ink-faint)" font-size="11.5">"continues behind" them.</text>
+      </g>
+    </svg>
+    </div>
+  </figure>
+  <ul>
+    <li><b>Millimetres, not points.</b> A 5K display and a built-in Retina display show different physical sizes per point, so the wall is laid out in mm from <code>CGDisplayScreenSize</code>. Objects stay the same physical size across a seam.</li>
+    <li><b>Guess, then let you correct.</b> By default, display centres follow the System Settings arrangement. <b>Arrange Displays…</b> (<a href="../src/app/GibsonArrange.mm">GibsonArrange.mm</a>, the largest file) lets you drag each panel to where it physically sits, set tilt and swivel (it can even read a MacBook's lid angle), enter bezel widths, and show an alignment pattern over the live city on the real displays. Positions are saved as <code>display_&lt;UUID&gt;</code> lines in <code>config.txt</code>.</li>
+    <li><b>In SceneKit terms:</b> each display gets a child camera node of the shared rig, turned to face its panel squarely (<code>view.basis</code>) and given a custom <code>projectionTransform</code>.</li>
+  </ul>
+<pre><code><span class="c">// GibsonWall.h — off-axis perspective (OpenGL clip conventions, as SCNCamera expects)</span>
+<span class="c">// l, r, b, t: the panel's edges at unit distance from the eye</span>
+<span class="k">return</span> simd_matrix(
+    simd_make_float4(<span class="n">2</span>n/(r-l), <span class="n">0</span>,        <span class="n">0</span>,                 <span class="n">0</span>),
+    simd_make_float4(<span class="n">0</span>,        <span class="n">2</span>n/(t-b), <span class="n">0</span>,                 <span class="n">0</span>),
+    simd_make_float4((r+l)/(r-l), (t+b)/(t-b), -(f+n)/(f-n), -<span class="n">1</span>),   <span class="c">// ← the off-centre shift</span>
+    simd_make_float4(<span class="n">0</span>,        <span class="n">0</span>,        -<span class="n">2</span>*f*n/(f-n),       <span class="n">0</span>));</code></pre>
+</section>
+
+<!-- ============================================================ -->
+<section id="game">
+  <h2><span class="num">09</span>Hack The Gibson</h2>
+  <p class="sub"><a href="../src/app/GibsonGame.mm">GibsonGame.mm</a>: the same city, but you choose the turns.</p>
+  <p><code>GibsonGameController</code> opens a borderless window on every display (the primary one also holds the menu and the HUD), points them at the shared world, and installs itself as the world's <code>cameraDriver</code>.</p>
+
+  <h3>Two threads, one lock</h3>
+  <p>Keys arrive on the <b>main thread</b>; the camera is driven on SceneKit's <b>render thread</b>. The handful of values they share (requested turn, climb/dive held, "start", "show the garbage file", "leave", HUD readouts) sit behind an <code>os_unfair_lock</code>. Everything else belongs to exactly one thread.</p>
+<pre><code><span class="k">- (void)</span>control:(NSString *)name down:(BOOL)down      <span class="c">// main thread</span>
+{
+    <span class="k">if</span> (down &amp;&amp; [name isEqualToString:_bindings[kActLeave]]) { [<span class="k">self</span> returnToTitle]; <span class="k">return</span>; }
+    os_unfair_lock_lock(&amp;_lock);
+    <span class="k">if</span> ([name isEqualToString:_bindings[kActUp]])        _climb = down;
+    <span class="k">else if</span> ([name isEqualToString:_bindings[kActDown]]) _dive = down;
+    <span class="k">else if</span> (down) {
+        <span class="k">if</span> ([name isEqualToString:_bindings[kActLeft]])       _pendingTurn = kTurnLeft;
+        <span class="k">else if</span> ([name isEqualToString:_bindings[kActRight]]) _pendingTurn = kTurnRight;
+    }
+    os_unfair_lock_unlock(&amp;_lock);
+}</code></pre>
+
+  <h3>Flying a grid instead of a spline</h3>
+  <p>The streets form a perfect grid (<a href="../src/scenekit/GibsonCity.h">GibsonCity.h</a>: blocks of 30, towers 7.3 from centre to face). The flight is a list of corners, <code>_nodes</code>, plus the distance travelled, <code>_s</code>. Each frame:</p>
+  <ol>
+    <li><b>Plan ahead.</b> <code>extendRoute:</code> adds corners until the route reaches 22 units past the camera. Each new corner uses your last <kbd>A</kbd>/<kbd>D</kbd> press (consumed), else straight on. At the city's edge it turns back inwards.</li>
+    <li><b>Smooth it.</b> The camera's position is the <i>average</i> of route points from 7 behind to 7 ahead, which rounds right angles into curves. It looks at a point 14 ahead. Yaw, bank, altitude and pitch each ease towards their targets with exponential smoothing (<code>1 − e^(−dt/τ)</code>), so nothing snaps.</li>
+    <li><b>Altitude.</b> Holding <kbd>W</kbd>/<kbd>S</kbd> moves a target height (3–80) at 16 units per second; the camera eases after it and tips its nose down to look over the rooftops when high.</li>
+  </ol>
+
+  <div class="demo" id="routeDemo">
+    <canvas id="routeCanvas" width="880" height="420" aria-label="Interactive top-down route planner"></canvas>
+    <div class="controls">
+      <button type="button" data-turn="left">◂ Turn left (A)</button>
+      <button type="button" data-turn="right">Turn right (D) ▸</button>
+      <button type="button" id="routePause">Pause</button>
+      <span class="readout" id="routeReadout">next corner: straight</span>
+    </div>
+    <figcaption>Try it: a top-down copy of the game's route logic. The thin line is the planned route of corners; the bright trail is where the smoothed camera actually flies. A turn locks in only when a new corner is planned 22 units ahead (the ring), so you press a little before the junction, as in the game.</figcaption>
+  </div>
+
+  <h3>Modes and drive states</h3>
+  <p>The controller has three UI modes (title, options, playing) and the render thread has a drive state. Pressing <kbd>Q</kbd> while flying returns to the title, but the drive state stays <code>Free</code>, so the flight carries on hands-off behind the menu, and Start Game simply resumes.</p>
+  <figure>
+    <div class="frame">
+    <svg viewBox="0 0 900 170" width="100%" role="img" aria-label="Drive states">
+      <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink-faint)"/></marker></defs>
+      <g font-size="12.5">
+        <rect x="10" y="60" width="90" height="44" rx="22" fill="var(--panel-2)" stroke="var(--line)"/><text x="55" y="87" text-anchor="middle" fill="var(--ink)">Off</text>
+        <rect x="130" y="60" width="100" height="44" rx="22" fill="var(--panel-2)" stroke="var(--line)"/><text x="180" y="87" text-anchor="middle" fill="var(--ink)">Starting</text>
+        <rect x="260" y="60" width="90" height="44" rx="22" fill="var(--panel)" stroke="var(--cyan)"/><text x="305" y="87" text-anchor="middle" fill="var(--cyan)" font-weight="700">Free</text>
+        <rect x="390" y="60" width="104" height="44" rx="22" fill="var(--panel-2)" stroke="var(--violet)"/><text x="442" y="87" text-anchor="middle" fill="var(--ink)">Approach</text>
+        <rect x="524" y="60" width="90" height="44" rx="22" fill="var(--panel-2)" stroke="var(--violet)"/><text x="569" y="87" text-anchor="middle" fill="var(--ink)">Push</text>
+        <rect x="644" y="60" width="90" height="44" rx="22" fill="var(--panel-2)" stroke="var(--violet)"/><text x="689" y="87" text-anchor="middle" fill="var(--ink)">Hold</text>
+        <rect x="764" y="60" width="110" height="44" rx="22" fill="var(--panel-2)" stroke="var(--violet)"/><text x="819" y="87" text-anchor="middle" fill="var(--ink)">Leaving</text>
+        <path d="M100 82 L128 82" stroke="var(--ink-faint)" marker-end="url(#ar3)"/>
+        <path d="M230 82 L258 82" stroke="var(--ink-faint)" marker-end="url(#ar3)"/>
+        <path d="M350 82 L388 82" stroke="var(--ink-faint)" marker-end="url(#ar3)"/>
+        <path d="M494 82 L522 82" stroke="var(--ink-faint)" marker-end="url(#ar3)"/>
+        <path d="M614 82 L642 82" stroke="var(--ink-faint)" marker-end="url(#ar3)"/>
+        <path d="M734 82 L762 82" stroke="var(--ink-faint)" marker-end="url(#ar3)"/>
+        <path d="M819 104 C819 150 305 150 305 106" stroke="var(--ink-faint)" fill="none" marker-end="url(#ar3)"/>
+        <text x="115" y="50" text-anchor="middle" fill="var(--ink-faint)" font-size="11">Start Game</text>
+        <text x="245" y="50" text-anchor="middle" fill="var(--ink-faint)" font-size="11">1.5 s blend</text>
+        <text x="369" y="50" text-anchor="middle" fill="var(--ink-faint)" font-size="11">type "garbage"</text>
+        <text x="508" y="50" text-anchor="middle" fill="var(--ink-faint)" font-size="11">7–13 s</text>
+        <text x="628" y="50" text-anchor="middle" fill="var(--ink-faint)" font-size="11">2.4 s</text>
+        <text x="749" y="50" text-anchor="middle" fill="var(--ink-faint)" font-size="11">Q</text>
+        <text x="560" y="160" text-anchor="middle" fill="var(--ink-faint)" font-size="11">1.6 s ease back onto the street</text>
+      </g>
+    </svg>
+    </div>
+  </figure>
+
+  <h3>Typing a word with keys that also steer</h3>
+  <p>"garbage" contains an <kbd>a</kbd> and an <kbd>s</kbd>, which are turn-left and dive. So letters that continue the word are <b>held back</b> instead of acting. If the word breaks off (a wrong letter, or 1.5 s pass), the held keys are replayed as controls. Type the whole word and no stray turn happens.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="garbage">
+  <h2><span class="num">10</span>The garbage file</h2>
+  <p class="sub"><a href="../src/app/GibsonGarbage.mm">GibsonGarbage.mm</a>: the film's scrolling directory, on the side of a tower.</p>
+
+  <h3>The approach</h3>
+  <p><code>beginGarbageAtTime:</code> picks a tower beside the street at least 70 units ahead, on a random side, and sets up the move:</p>
+  <ul>
+    <li><b>Approach</b> (7–13 s, depending on speed): a cubic ease along the street while the camera drifts to the far side and rises to the file's height (from 40% of the way), then turns to face it (from 55%).</li>
+    <li><b>The tower fades in</b> from an ordinary tower: its glow dims and its faces darken from 15% to 75% of the approach, and the directory lists fade in from 35% to 90%. Every face carries dark plates and decoy lists scrolling at their own speeds, "as if it were filtering down to matches".</li>
+    <li>At 90% the real list starts slowing. <b>Push</b> (2.4 s) eases in until the list fills about 85% of the view, squared up. <b>Hold</b> waits for <kbd>Q</kbd>.</li>
+    <li><b>On several displays</b> the file is framed on one display, picked at random: the camera rig is turned so that display's camera faces the file squarely, and shifted so the file sits at the centre of that display's off-axis view. If fitting it would put the camera past the far side of the street, the file is drawn smaller instead.</li>
+  </ul>
+
+  <h3>How the list is drawn</h3>
+  <p>The list is a single plane with a texture, not 3D text. The 32 names (from the film, misspellings and all, with GARBAGE twice) are drawn once with AppKit into a tall <b>strip</b> image, 1024 px wide with 48 px per line. The plane shows 24 lines of it, and scrolling is just moving the texture: <code>contentsTransform</code> with wrap-around.</p>
+  <p>The film's list doesn't glide: each name jumps to the next line. So the offset is <b>floored to whole lines</b>, at 8 lines per second.</p>
+
+  <div class="demo">
+    <canvas id="listCanvas" width="880" height="300" aria-label="Directory list scrolling demo"></canvas>
+    <div class="controls">
+      <button type="button" id="stepBtn" class="on">Stepped (as in the film)</button>
+      <button type="button" id="smoothBtn">Smooth</button>
+      <button type="button" id="stopBtn">Stop on GARBAGE</button>
+      <span class="readout" id="listReadout">8 lines/s</span>
+    </div>
+    <figcaption>A 2D copy of the column: stepped vs smooth scrolling, then the stop, the selection, the file boxes and the blink. (The page uses system fonts; the game uses Eurostile/Microgramma if you have them, else the bundled Michroma.)</figcaption>
+  </div>
+
+  <ul>
+    <li><b>The stop</b> eases out to a resting line chosen so GARBAGE lands on row 11, just above the middle.</li>
+    <li><b>Then six still frames</b>, rendered on a background queue while it slows: the selection with 0–4 file boxes revealed (0.135 s apart), plus a "blink off" frame. The material swaps between them. Timings were measured from the clip at 120 fps.</li>
+    <li><b>Staying on top of the glass.</b> SceneKit draws the transparent tower glass after the plane whatever the rendering order, which would cover it. So the list writes depth wherever there's ink and throws away empty pixels in a one-line fragment shader: <code>if (_output.color.a &lt; 0.06) discard_fragment();</code>. The tower shows between the letters but can't draw over them.</li>
+  </ul>
+
+  <h3>Fonts</h3>
+  <p>The film's lettering is a stretched Eurostile Extended / Microgramma, both commercial. <a href="../src/app/GibsonFonts.mm">GibsonFonts.mm</a> registers fonts <i>for this process only</i> (<code>CTFontManagerRegisterFontsForURL</code>, process scope) from <code>~/Library/Application Support/TheGibson/fonts/</code> first, then the bundled <b>Michroma</b> (SIL OFL), then falls back to the system font. Each gets a little extra horizontal stretch, or a stroke to thicken Michroma's single weight.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="sound">
+  <h2><span class="num">11</span>Music and sound</h2>
+  <p class="sub">A soundtrack you supply, and sound effects made from sine waves.</p>
+  <div class="grid2">
+    <div class="card"><span class="path">saver/GibsonMusic.mm</span><h4>The soundtrack</h4><p>Opt-in (<code>music_enabled</code>). Loops your MP3 with AVFoundation while a full-size session runs. One shared player per process, so several displays don't play it several times.</p></div>
+    <div class="card"><span class="path">app/GibsonSFX.mm</span><h4>Synthesized effects</h4><p>Nothing is sampled. The film's selection trill and blink pulse were analysed from spectrograms and rebuilt as sums of gated sine partials, rendered into PCM buffers at startup and played on an <code>AVAudioEngine</code>.</p></div>
+  </div>
+  <p>The <b>select</b> sound is a 25 Hz trill: two square-ish beeps (1755 Hz with odd harmonics, and 4547 Hz) alternating every 20 ms, then soft-clipped with <code>tanh</code> for some bite. The <b>pulse</b> layers five tones with their own burst patterns, stretched 1.85× to fit the game's slower blink. A raised-cosine gate shapes every burst so the edges don't click:</p>
+<pre><code><span class="k">static double</span> gibson_gate(<span class="k">double</span> t, <span class="k">double</span> start, <span class="k">double</span> length, <span class="k">double</span> edge = <span class="n">0.0025</span>)
+{
+    <span class="k">const double</span> u = t - start;
+    <span class="k">if</span> (u &lt; <span class="n">0</span> || u &gt; length) <span class="k">return</span> <span class="n">0</span>;
+    <span class="k">if</span> (u &lt; edge)            <span class="k">return</span> <span class="n">0.5</span> - <span class="n">0.5</span> * cos(M_PI * u / edge);              <span class="c">// fade in</span>
+    <span class="k">if</span> (u &gt; length - edge)   <span class="k">return</span> <span class="n">0.5</span> - <span class="n">0.5</span> * cos(M_PI * (length - u) / edge);   <span class="c">// fade out</span>
+    <span class="k">return</span> <span class="n">1</span>;
+}</code></pre>
+  <p>Run <code>TheGibson --write-sounds &lt;dir&gt;</code> to save both as WAV files and listen.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="settings">
+  <h2><span class="num">12</span>Settings</h2>
+  <p class="sub">One plain-text file, read by every part.</p>
+  <p><a href="../src/gibson_settings.cpp">gibson_settings.cpp</a> is dependency-free C++. It parses <code>key = value</code> lines from <code>~/Library/Application Support/TheGibson/config.txt</code>, creates the file from a commented template on first run, adds new keys to older files, and rewrites a single key's line in place (keeping your comments) when the app or the game changes something. <code>gibson_settings_raw("any_key")</code> reads keys the core doesn't know about, which is how the game stores its bindings.</p>
+  <table>
+    <tr><th>Group</th><th>Keys</th></tr>
+    <tr><td>Flight</td><td><code>fly_speed</code> <code>bank_strength</code> <code>bank_max_degrees</code> <code>bank_smoothing</code> <code>swoop_at</code></td></tr>
+    <tr><td>Displays</td><td><code>span_displays</code> <code>render_scale</code> <code>display_&lt;UUID&gt;</code> <code>bezel_&lt;UUID&gt;</code></td></tr>
+    <tr><td>Sound</td><td><code>music_enabled</code> <code>music</code> <code>music_volume</code> <code>sfx_volume</code></td></tr>
+    <tr><td>Game</td><td><code>key_up</code> <code>key_left</code> <code>key_down</code> <code>key_right</code> <code>key_leave_file</code> <code>garbage_word</code> <code>show_hud</code></td></tr>
+    <tr><td>Debug</td><td><code>show_timer</code></td></tr>
+  </table>
+  <p>The screensaver re-reads the file each time it starts, so changes apply at the next session.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="tools">
+  <h2><span class="num">13</span>Tools and tricks</h2>
+  <p class="sub">How the look was made, and how it's tested without staring at a screensaver.</p>
+  <div class="grid2">
+    <div class="card"><span class="path">tools/gen_textures.py</span><h4>Texture generator</h4><p>Draws the 16 tower textures (8 animation frames × 2 styles) as greyscale plus alpha: bold glowing words like <code>GARB</code>, <code>ELLIS</code> and <code>DA VINCI</code>, drawn on a taller virtual canvas and squashed to fit the mesh's UVs so glyphs stay square. It also generates the circuit-board floor (right-angle routing, vias, two trace weights).</p></div>
+    <div class="card"><span class="path">tools/trace_analysis.py</span><h4>Reverse-engineering the floor</h4><p>OpenCV over film stills: picks frames with visible traces, finds the two vanishing points to warp the floor to a top-down view, then measures trace widths, spacing and bundle sizes for the generator to match.</p></div>
+    <div class="card"><span class="path">src/scenekit/scn_preview.mm</span><h4>Offscreen renders</h4><p>A preview window that can also render shots offscreen to PNG, including a <code>--garbage</code> harness that frames the file on a tower and grabs it at set moments.</p></div>
+    <div class="card"><span class="path">src/saver/gibson_bench.mm</span><h4>Benchmark</h4><p>Runs the real saver view on every display and reports CPU, fps and memory, with switches for effects, towers, mirror and floor. This is how the power savings were found.</p></div>
+  </div>
+  <h3>Development switches</h3>
+  <table>
+    <tr><th>Environment variable</th><th>Effect</th></tr>
+    <tr><td><code>GIBSON_GAME_DEMO=1</code></td><td>The game plays itself: start, a turn, a climb, the garbage file, leave, exit. A smoke test with no hands.</td></tr>
+    <tr><td><code>GIBSON_BUNDLED_FONTS_ONLY=1</code></td><td>Ignore your own fonts and show what everyone else sees (Michroma).</td></tr>
+    <tr><td><code>GIBSON_GARBAGE_DUMP=dir</code></td><td>Save the garbage file's textures as images.</td></tr>
+    <tr><td><code>GIBSON_TOWER_SCALE</code>, <code>GIBSON_FLOOR_REPEAT</code>, <code>GIBSON_MIRROR_DIST</code></td><td>Override tower footprint, floor tiling and reflection distance for test renders.</td></tr>
+  </table>
+</section>
+
+<!-- ============================================================ -->
+<section id="map">
+  <h2><span class="num">14</span>Code map</h2>
+  <p class="sub">Every source file, roughly in reading order. Links open the files in this checkout.</p>
+  <table>
+    <tr><th>File</th><th>What's in it</th><th class="r">Lines</th></tr>
+    <tr><td><a href="../src/scenekit/GibsonSCNScene.mm">scenekit/GibsonSCNScene.mm</a></td><td>The world: towers, floor, mirror, pulses, the per-frame tick</td><td class="r">669</td></tr>
+    <tr><td><a href="../src/scenekit/GibsonSCNCamera.mm">scenekit/GibsonSCNCamera.mm</a></td><td>Spline flight, banking, camera grade, flight "moments" for Arrange</td><td class="r">320</td></tr>
+    <tr><td><a href="../src/fly_path.h">fly_path.h</a></td><td>The 41 original waypoints</td><td class="r">54</td></tr>
+    <tr><td><a href="../src/scenekit/GibsonCity.h">scenekit/GibsonCity.h</a></td><td>Grid constants shared by the game</td><td class="r">21</td></tr>
+    <tr><td><a href="../src/scenekit/GibsonWall.h">scenekit/GibsonWall.h</a></td><td>Multi-display geometry and off-axis projection (pure maths)</td><td class="r">203</td></tr>
+    <tr><td><a href="../src/scenekit/GibsonWallScreens.mm">scenekit/GibsonWallScreens.mm</a></td><td>Reads the attached displays and saved positions</td><td class="r">52</td></tr>
+    <tr><td><a href="../src/gibson_settings.cpp">gibson_settings.cpp</a></td><td>config.txt parsing, template, in-place writes</td><td class="r">551</td></tr>
+    <tr><td><a href="../src/saver/GibsonSaverView.mm">saver/GibsonSaverView.mm</a></td><td>The screensaver's per-display view and its host workarounds</td><td class="r">688</td></tr>
+    <tr><td><a href="../src/saver/GibsonScreenSaverViewController.mm">saver/GibsonScreenSaverViewController.mm</a></td><td>Extension entry point that hands out views</td><td class="r">75</td></tr>
+    <tr><td><a href="../src/saver/GibsonMusic.mm">saver/GibsonMusic.mm</a></td><td>The looping soundtrack</td><td class="r">125</td></tr>
+    <tr><td><a href="../src/app/GibsonApp.mm">app/GibsonApp.mm</a></td><td>Settings window, Preview, launch flags</td><td class="r">684</td></tr>
+    <tr><td><a href="../src/app/GibsonArrange.mm">app/GibsonArrange.mm</a></td><td>Arrange Displays editor</td><td class="r">1,515</td></tr>
+    <tr><td><a href="../src/app/GibsonGame.mm">app/GibsonGame.mm</a></td><td>The game: windows, menus, input, route flight, garbage sequence</td><td class="r">1,487</td></tr>
+    <tr><td><a href="../src/app/GibsonGarbage.mm">app/GibsonGarbage.mm</a></td><td>The directory column and its frames</td><td class="r">408</td></tr>
+    <tr><td><a href="../src/app/GibsonSFX.mm">app/GibsonSFX.mm</a></td><td>Synthesized sound effects</td><td class="r">260</td></tr>
+    <tr><td><a href="../src/app/GibsonFonts.mm">app/GibsonFonts.mm</a></td><td>Film-font lookup and fallback</td><td class="r">84</td></tr>
+    <tr><td><a href="../src/app/GibsonLidAngle.mm">app/GibsonLidAngle.mm</a></td><td>Reads a MacBook's lid angle for Arrange</td><td class="r">43</td></tr>
+  </table>
+  <div class="callout"><p><b>A good reading path:</b> start at <code>initWithPreview:</code> in GibsonSCNScene.mm, then <code>tickAtTime:</code>, then <code>updateAtTime:startTime:</code> in GibsonSCNCamera.mm. Then jump to <code>driveCamera:atTime:delta:</code> in GibsonGame.mm and follow the <code>switch (_drive)</code>.</p></div>
+</section>
+
+<!-- ============================================================ -->
+<section id="history">
+  <h2><span class="num">15</span>How it got here</h2>
+  <p class="sub">From a Windows screensaver to this, per the README and git history.</p>
+  <ul class="timeline">
+    <li><div class="when">The beginning</div><b>John Serafino</b> builds the original Gibson screensaver for Windows on the Irrlicht engine.</li>
+    <li><div class="when">The port</div><b>Paul Kiernan</b> pares it down into a windowed OS X app and opens it up (hence the left-handed coordinates and the 41 waypoints).</li>
+    <li><div class="when">SceneKit rebuild</div>A native SceneKit screensaver, then shipped as an ExtensionKit appex inside TheGibson.app.</li>
+    <li><div class="when">The film grade</div>Movie-accurate colours, generated textures, the shifting glow, motion blur, low flight, tighter canyons, the circuit-board floor with trace-only reflections.</li>
+    <li><div class="when">Performance</div>CPU halved (culled tower nodes, prebuilt materials), then GPU power from 32 W to 4 W.</li>
+    <li><div class="when">Displays &amp; music</div>Spanning every display with Arrange Displays; an opt-in soundtrack and the swoop timed to it.</li>
+    <li><div class="when">The game</div>Hack The Gibson: grid flight, the garbage file with film fonts and synthesized sounds, multi-display framing.</li>
+  </ul>
+  <p style="color:var(--ink-faint);font-size:13.5px;margin-top:30px">Line counts are as of commit 05cd7b2. This page is plain HTML with no network requests: open <code>docs/how-it-works.html</code> from the repository so the screenshot and source links resolve.</p>
+</section>
+</main>
+</div>
+
+<script>
+/* ---------- theme toggle ---------- */
+(function () {
+  var root = document.documentElement;
+  var stored = null;
+  try { stored = localStorage.getItem('gibson-doc-theme'); } catch (e) {}
+  if (stored) root.setAttribute('data-theme', stored);
+  else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) root.setAttribute('data-theme', 'light');
+  document.getElementById('themeBtn').addEventListener('click', function () {
+    var next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('gibson-doc-theme', next); } catch (e) {}
+  });
+})();
+
+/* ---------- active section in the contents ---------- */
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+  var byId = {};
+  links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+  if (!('IntersectionObserver' in window)) return;
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting) {
+        links.forEach(function (a) { a.classList.remove('active'); });
+        var a = byId[e.target.id];
+        if (a) a.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-30% 0px -60% 0px' });
+  document.querySelectorAll('section[id]').forEach(function (s) { io.observe(s); });
+})();
+
+/* Canvas helpers: size to CSS pixels x devicePixelRatio. */
+function fitCanvas(c) {
+  var r = c.getBoundingClientRect();
+  var dpr = window.devicePixelRatio || 1;
+  var w = Math.max(300, Math.round(r.width));
+  var h = Math.round(w * (c.height / c.width));
+  c._w = w; c._h = h;
+  c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+  c.style.height = h + 'px';
+  var ctx = c.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return ctx;
+}
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+/* ---------- route planner demo (mirrors extendRoute / routePoseWithDelta) ---------- */
+(function () {
+  var canvas = document.getElementById('routeCanvas');
+  var aspect = canvas.height / canvas.width;
+  var ctx = fitCanvas(canvas);
+  var BLOCK = 30, HALF = 7.3, PLAN = 22, SMOOTH = 7, LOOK = 14, SPEED = 18;
+  var GRID = 9;                              // blocks across the demo city
+  var dirs = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+  var nodes, cum, segDir, s, pending, trail, yaw, paused = false;
+  var readout = document.getElementById('routeReadout');
+
+  function inside(p) { return p[0] >= BLOCK && p[0] <= (GRID - 1) * BLOCK && p[1] >= BLOCK && p[1] <= (GRID - 1) * BLOCK; }
+  function reset() {
+    var start = [Math.floor(GRID / 2) * BLOCK, BLOCK];
+    nodes = [start, [start[0], start[1] + BLOCK]];
+    cum = [0, BLOCK]; segDir = [0]; s = BLOCK * 0.5; pending = 0; trail = []; yaw = 0;
+    extend();
+  }
+  function turnDir(d, t) { return t === 1 ? (d + 3) % 4 : t === 2 ? (d + 1) % 4 : t === 3 ? (d + 2) % 4 : d; }
+  function extend() {
+    while (cum[cum.length - 1] < s + PLAN) {
+      var d = segDir[segDir.length - 1];
+      var t = pending; pending = 0;
+      var last = nodes[nodes.length - 1];
+      var nd = turnDir(d, t);
+      var cand = [last[0] + dirs[nd][0] * BLOCK, last[1] + dirs[nd][1] * BLOCK];
+      if (!inside(cand)) {
+        var best = 1e9, c = [GRID * BLOCK / 2, GRID * BLOCK / 2];
+        [0, 1, 2, 3].forEach(function (tt) {
+          var dd = turnDir(d, tt);
+          var p = [last[0] + dirs[dd][0] * BLOCK, last[1] + dirs[dd][1] * BLOCK];
+          var dist = Math.hypot(p[0] - c[0], p[1] - c[1]);
+          if (inside(p) && dist < best) { best = dist; nd = dd; }
+        });
+      }
+      nodes.push([last[0] + dirs[nd][0] * BLOCK, last[1] + dirs[nd][1] * BLOCK]);
+      cum.push(cum[cum.length - 1] + BLOCK);
+      segDir.push(nd);
+    }
+    while (nodes.length > 3 && cum[1] < s - 40) { nodes.shift(); cum.shift(); segDir.shift(); }
+    updateReadout();
+  }
+  function point(at) {
+    for (var i = 0; i < cum.length - 1; i++) {
+      if (at <= cum[i + 1] || i === cum.length - 2) {
+        var u = Math.max(0, Math.min(1, (at - cum[i]) / (cum[i + 1] - cum[i])));
+        return [nodes[i][0] + (nodes[i + 1][0] - nodes[i][0]) * u, nodes[i][1] + (nodes[i + 1][1] - nodes[i][1]) * u];
+      }
+    }
+    return nodes[0];
+  }
+  function updateReadout() {
+    readout.textContent = 'next corner: ' + (pending === 1 ? '◂ left' : pending === 2 ? 'right ▸' : 'straight');
+  }
+  function request(t) { pending = t; updateReadout(); }
+
+  document.querySelectorAll('#routeDemo [data-turn]').forEach(function (b) {
+    b.addEventListener('click', function () { request(b.getAttribute('data-turn') === 'left' ? 1 : 2); });
+  });
+  document.getElementById('routePause').addEventListener('click', function () {
+    paused = !paused; this.textContent = paused ? 'Play' : 'Pause'; this.classList.toggle('on', paused);
+  });
+  var demoVisible = false;
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function (e) { demoVisible = e[0].isIntersecting; }).observe(canvas);
+  } else demoVisible = true;
+  window.addEventListener('keydown', function (e) {
+    if (!demoVisible || e.metaKey || e.ctrlKey) return;
+    var k = e.key.toLowerCase();
+    if (k === 'a') request(1); else if (k === 'd') request(2);
+  });
+  window.addEventListener('resize', function () { ctx = fitCanvas(canvas); });
+
+  function draw() {
+    var W = canvas._w, H = canvas._h;
+    var bg = cssVar('--bg') || '#05080d';
+    ctx.fillStyle = '#03060a'; ctx.fillRect(0, 0, W, H);
+    // camera-centred view
+    var avg = [0, 0];
+    for (var i = -4; i <= 4; i++) { var p = point(s + SMOOTH * i / 4); avg[0] += p[0]; avg[1] += p[1]; }
+    avg[0] /= 9; avg[1] /= 9;
+    var scale = H / 150;
+    function X(x) { return W / 2 + (x - avg[0]) * scale; }
+    function Y(y) { return H / 2 - (y - avg[1]) * scale; }
+    // towers
+    for (var gx = 0; gx < GRID; gx++) for (var gy = -1; gy < GRID; gy++) {
+      var cx = gx * BLOCK + BLOCK / 2, cy = gy * BLOCK + BLOCK / 2;
+      var x0 = X(cx - HALF), y0 = Y(cy + HALF);
+      if (x0 > W + 40 || x0 < -80 || y0 > H + 40 || y0 < -80) continue;
+      ctx.fillStyle = 'rgba(40,90,160,0.28)'; ctx.strokeStyle = 'rgba(127,233,255,0.35)';
+      ctx.fillRect(x0, y0, 2 * HALF * scale, 2 * HALF * scale);
+      ctx.strokeRect(x0 + 0.5, y0 + 0.5, 2 * HALF * scale - 1, 2 * HALF * scale - 1);
+    }
+    // city edge
+    ctx.strokeStyle = 'rgba(255,207,107,0.35)'; ctx.setLineDash([4, 4]);
+    ctx.strokeRect(X(BLOCK), Y((GRID - 1) * BLOCK), (GRID - 2) * BLOCK * scale, (GRID - 2) * BLOCK * scale);
+    ctx.setLineDash([]);
+    // planned route
+    ctx.strokeStyle = 'rgba(160,190,220,0.6)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); nodes.forEach(function (n, i) { if (i) ctx.lineTo(X(n[0]), Y(n[1])); else ctx.moveTo(X(n[0]), Y(n[1])); }); ctx.stroke();
+    nodes.forEach(function (n) { ctx.fillStyle = 'rgba(160,190,220,0.8)'; ctx.fillRect(X(n[0]) - 2, Y(n[1]) - 2, 4, 4); });
+    // plan-ahead ring
+    var pa = point(s + PLAN);
+    ctx.strokeStyle = 'rgba(255,207,107,0.9)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(X(pa[0]), Y(pa[1]), 7, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,207,107,0.9)'; ctx.font = '11px ui-monospace, Menlo, monospace';
+    ctx.fillText('plan-ahead (22)', X(pa[0]) + 10, Y(pa[1]) - 8);
+    // trail
+    ctx.lineWidth = 3; ctx.lineCap = 'round';
+    for (var t = 1; t < trail.length; t++) {
+      ctx.strokeStyle = 'rgba(127,233,255,' + (t / trail.length) * 0.9 + ')';
+      ctx.beginPath(); ctx.moveTo(X(trail[t - 1][0]), Y(trail[t - 1][1])); ctx.lineTo(X(trail[t][0]), Y(trail[t][1])); ctx.stroke();
+    }
+    // camera + look point
+    var look = point(s + LOOK);
+    ctx.strokeStyle = 'rgba(127,233,255,0.4)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(X(avg[0]), Y(avg[1])); ctx.lineTo(X(look[0]), Y(look[1])); ctx.stroke();
+    ctx.save(); ctx.translate(X(avg[0]), Y(avg[1])); ctx.rotate(yaw);
+    ctx.fillStyle = '#7fe9ff'; ctx.shadowColor = '#7fe9ff'; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(6, 7); ctx.lineTo(-6, 7); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    return avg;
+  }
+  var last = performance.now();
+  function frame(now) {
+    var dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (!paused && demoVisible) {
+      s += SPEED * dt; extend();
+      var avg = draw();
+      var look = point(s + LOOK);
+      var target = Math.atan2(look[0] - avg[0], look[1] - avg[1]);
+      var d = target - yaw; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+      yaw += d * (1 - Math.exp(-dt / 0.2));
+      trail.push(avg); if (trail.length > 160) trail.shift();
+    } else if (!trail.length) { draw(); }
+    requestAnimationFrame(frame);
+  }
+  reset(); draw(); requestAnimationFrame(frame);
+})();
+
+/* ---------- directory list demo (mirrors GibsonGarbageColumn) ---------- */
+(function () {
+  var NAMES = ['ANNUAL BUDGETS', 'COMP. OPERATIONS', 'KINEMATICS', 'SEA-BOARD LAWS', 'TPGC. EXPEND.', 'WRHSE. LOCATION',
+    'COMPANY STATUS', 'COMPOSITE PLANTS', 'EXPLOR. DVLT.', 'EXPLOR. RESEARCH', 'GEOLOGIC RESEARCH', 'GARBAGE',
+    'GEOLOGIC BUDGETS', 'DIVING CONSULTANTS', 'BALLAST REPORTS', 'MINE DEVELOPMENT', 'BLAST FRNC. STATUS',
+    'NUCLEAR REARSCH', 'RECRUITMENT', 'AIRFREIGHT STATUS', 'COMP. SYSTEMS', 'SCIENTIFIC EXPEND', 'URBAN RELOCATION',
+    'VIRAL PROTECTION', 'COMPANY SPENDING', 'PERSONNEL', 'SHIPPING FORCASTS', 'ACCOUNTANTS', 'SHIPPING ROUTINGS',
+    'TPGC. REPORTS', 'WRHSE. EXPEND.', 'GARBAGE'];
+  var CYCLE = NAMES.length, ROWS = 9, REST_ROW = 4, LPS = 8;
+  var PANEL = ['CONFIDENTIAL', 'FILES', 'DO NOT DELETE', 'BEFORE FINAL', 'BACKUP IS COMPLETED'];
+  var canvas = document.getElementById('listCanvas');
+  var ctx = fitCanvas(canvas);
+  var stepped = true, phase = 'scroll', top = 0, t0 = performance.now(), stopFrom = 0, stopDist = 0, stopStart = 0, stopDur = 0, restTime = 0;
+  var readout = document.getElementById('listReadout');
+  var stepBtn = document.getElementById('stepBtn'), smoothBtn = document.getElementById('smoothBtn'), stopBtn = document.getElementById('stopBtn');
+  var visible = true;
+  if ('IntersectionObserver' in window) new IntersectionObserver(function (e) { visible = e[0].isIntersecting; }).observe(canvas);
+  window.addEventListener('resize', function () { ctx = fitCanvas(canvas); });
+  stepBtn.onclick = function () { stepped = true; stepBtn.classList.add('on'); smoothBtn.classList.remove('on'); };
+  smoothBtn.onclick = function () { stepped = false; smoothBtn.classList.add('on'); stepBtn.classList.remove('on'); };
+  stopBtn.onclick = function () {
+    if (phase !== 'scroll') { phase = 'scroll'; stopBtn.textContent = 'Stop on GARBAGE'; t0 = performance.now(); top = Math.floor(top); return; }
+    // the list scrolls downwards: top decreases. Find a rest top that puts GARBAGE on REST_ROW, a few lines on.
+    var target = Math.floor(top) - 6;
+    while (true) {
+      var idx = (((target + REST_ROW) % CYCLE) + CYCLE) % CYCLE;
+      if (NAMES[idx] === 'GARBAGE') break;
+      target--;
+    }
+    stopFrom = top; stopDist = top - target; stopStart = performance.now(); stopDur = Math.max(0.8, stopDist / LPS * 1.8) * 1000;
+    phase = 'stopping'; stopBtn.textContent = 'Scroll again';
+  };
+  function name(i) { return NAMES[((i % CYCLE) + CYCLE) % CYCLE]; }
+  function draw(now) {
+    var W = canvas._w, H = canvas._h;
+    ctx.fillStyle = '#020509'; ctx.fillRect(0, 0, W, H);
+    var lineH = H / (ROWS + 1), y0 = lineH * 0.9, nameRight = W * 0.5, panelL = W * 0.55, panelR = W * 0.92;
+    var shown = stepped || phase !== 'scroll' ? Math.floor(top) : top;
+    var frac = shown - Math.floor(shown);
+    var fs = Math.max(11, Math.round(lineH * 0.42));
+    ctx.font = '800 ' + fs + 'px "Eurostile", "Microgramma", "Michroma", -apple-system, "Helvetica Neue", Arial, sans-serif';
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'right';
+    var since = phase === 'rest' ? (now - restTime) / 1000 - 0.65 : -1;
+    var selected = since >= 0;
+    var off = false;
+    if (since >= 0.95) { var b = since - 0.95; off = b < 1.15 ? b < 0.55 : ((b - 1.15) % 1.3) < 0.45; }
+    for (var r = -1; r <= ROWS; r++) {
+      var y = y0 + (r + frac) * lineH;
+      var idx = Math.floor(shown) + r;
+      var isSel = selected && r === REST_ROW && !off && phase === 'rest';
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = isSel ? 'rgba(64,102,255,0.9)' : 'rgba(77,204,255,0.55)';
+      ctx.fillStyle = isSel ? 'rgba(225,235,255,1)' : 'rgba(174,242,255,0.9)';
+      ctx.fillText(name(idx), nameRight, y);
+      ctx.beginPath();
+      ctx.moveTo(nameRight + 10, y - 5); ctx.lineTo(nameRight + 20, y); ctx.lineTo(nameRight + 10, y + 5); ctx.closePath(); ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+    if (selected && !off) {
+      var boxes = since < 0.07 ? 0 : Math.min(PANEL.length, 1 + Math.floor((since - 0.07) / 0.135));
+      ctx.textAlign = 'center';
+      ctx.font = '800 ' + Math.round(fs * 0.8) + 'px "Eurostile", "Michroma", -apple-system, "Helvetica Neue", Arial, sans-serif';
+      for (var k = 0; k < boxes; k++) {
+        var by = y0 + (REST_ROW + frac) * lineH + k * lineH * 0.9;
+        ctx.strokeStyle = 'rgba(225,235,255,0.95)'; ctx.shadowColor = 'rgba(64,102,255,0.9)'; ctx.shadowBlur = 10; ctx.lineWidth = 2;
+        ctx.strokeRect(panelL, by - lineH * 0.36, panelR - panelL, lineH * 0.72);
+        ctx.fillStyle = 'rgba(225,235,255,1)';
+        ctx.fillText(PANEL[k], (panelL + panelR) / 2, by);
+      }
+      ctx.shadowBlur = 0;
+    }
+    readout.textContent = phase === 'scroll' ? (stepped ? 'stepped · ' : 'smooth · ') + LPS + ' lines/s'
+      : phase === 'stopping' ? 'easing to a stop…' : selected ? (off ? 'blink: off' : 'blink: lit') : 'stopped';
+  }
+  function frame(now) {
+    if (visible) {
+      if (phase === 'scroll') top = -LPS * (now - t0) / 1000;
+      else if (phase === 'stopping') {
+        var x = Math.min(1, (now - stopStart) / stopDur);
+        top = stopFrom - stopDist * (1 - (1 - x) * (1 - x));
+        if (x >= 1) { phase = 'rest'; restTime = now; top = Math.round(top); }
+      }
+      draw(now);
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
